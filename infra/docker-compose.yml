@@ -1,0 +1,17 @@
+services:
+  db:
+    image: postgres:16
+    container_name: esports_db
+    restart: always
+    environment:
+      POSTGRES_USER: esports
+      POSTGRES_PASSWORD: esports
+      POSTGRES_DB: esports
+    ports:
+      - "5432:5432"
+    volumes:
+      - esports_pgdata:/var/lib/postgresql/data
+
+volumes:
+  esports_pgdata:
+
