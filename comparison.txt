@@ -1,0 +1,579 @@
+# Esports Analytics Platform — Complete Capstone Implementation Plan
+
+## 1. Project Overview
+
+This project builds a **web-based esports analytics platform for League of Legends** that ingests Riot API data, processes match timelines and drafts, extracts strategic and spatial features, trains predictive models, and presents insights through interactive dashboards.
+
+The system goes beyond static statistics and provides:
+
+* draft intelligence
+* timeline-based game analysis
+* team performance evaluation
+* map-based macro analysis
+* predictive machine learning models
+* coaching-style recommendations
+
+The project demonstrates complexity across **data engineering, backend architecture, analytics pipelines, machine learning, and visualization systems**.
+
+---
+
+# 2. Final System Architecture
+
+```
+Riot API
+   ↓
+FastAPI Ingestion Services
+   ↓
+PostgreSQL Raw Data Layer
+   ↓
+Feature Engineering & Analytics Layer
+   ↓
+Machine Learning Training & Inference
+   ↓
+REST API Endpoints
+   ↓
+React Dashboard & Visualization
+```
+
+---
+
+# 3. Core System Modules
+
+## Module A — Data Ingestion and Storage
+
+This layer retrieves and normalizes data from Riot's Match-V5 API.
+
+### Responsibilities
+
+* Riot ID → PUUID resolution
+* match ID retrieval
+* match ingestion
+* timeline ingestion
+* draft ingestion
+* backfill jobs
+* coverage tracking
+
+### Core Tables
+
+Existing:
+
+* `players`
+* `matches`
+* `participant_stats`
+* `team_objectives`
+* `team_bans`
+* `draft_actions`
+* `derived_metrics`
+
+New timeline tables:
+
+#### match_timeline_frames
+
+Stores player state snapshots.
+
+Columns:
+
+* id
+* match_id
+* timestamp_ms
+* participant_id
+* team_id
+* position_x
+* position_y
+* current_gold
+* total_gold
+* xp
+* level
+* minions_killed
+* jungle_minions_killed
+
+#### match_timeline_events
+
+Stores timeline events.
+
+Columns:
+
+* id
+* match_id
+* timestamp_ms
+* event_type
+* participant_id
+* team_id
+* killer_id
+* victim_id
+* assisting_participant_ids
+* item_id
+* position_x
+* position_y
+* monster_type
+* tower_type
+* lane_type
+* payload_json
+
+These tables enable advanced analytics and ML features.
+
+---
+
+# 4. Analytics Engine
+
+This module converts raw match data into strategic metrics.
+
+### Base Metrics
+
+* KDA
+* gold per minute
+* CS per minute
+* kill participation
+* damage share
+* vision per minute
+
+### Draft Analytics
+
+* champion pick rate
+* champion ban rate
+* role performance
+* synergy scores
+* counter matchup scores
+
+### Timeline Analytics
+
+* gold difference at 5/10/15/20 minutes
+* XP difference checkpoints
+* objective progression
+* item timing
+* team damage distribution
+* teamfight detection
+* gank detection
+* jungle path summaries
+
+### Map / Spatial Analytics
+
+* lane presence
+* roam frequency
+* objective setup positioning
+* side control pressure
+* team grouping metrics
+
+---
+
+# 5. Machine Learning System
+
+The ML layer uses engineered features to produce predictive insights.
+
+Models are implemented using standard libraries such as **scikit-learn**.
+
+### Model 1 — Draft Win Probability
+
+Input:
+
+* champion picks
+* bans
+* synergy score
+* counter score
+* historical champion-role performance
+
+Output:
+
+* predicted win probability before the game begins
+
+---
+
+### Model 2 — Mid-Game Win Probability
+
+Input features:
+
+* gold difference
+* XP difference
+* dragons
+* towers
+* barons
+* item spikes
+* teamfight outcomes
+* spatial map features
+
+Output:
+
+* probability of winning given the current match state
+
+---
+
+### Model 3 — Team Performance Evaluation
+
+Input:
+
+* role damage share
+* objective control
+* roam frequency
+* gank success rate
+* jungle pressure
+* vision control
+* team grouping score
+
+Output:
+
+* team macro performance score
+* underperforming role detection
+* strategic insights
+
+---
+
+# 6. Machine Learning Data Pipeline
+
+## Raw Data
+
+* match data
+* timeline frames
+* timeline events
+* draft actions
+
+## Feature Engineering
+
+Derived features include:
+
+* gold_diff_10
+* xp_diff_10
+* dragons_15
+* towers_15
+* barons_20
+* first_item_time_adc
+* jungle_first_gank_time
+* support_roam_count
+* team_damage_share_adc
+* vision_diff_15
+* draft_synergy_score
+* draft_counter_score
+
+## Training Tables
+
+### team_snapshots
+
+Team state at specific game minutes.
+
+Columns:
+
+* match_id
+* team_id
+* minute
+* gold_total
+* gold_diff
+* xp_total
+* xp_diff
+* kills
+* kill_diff
+* dragons
+* towers
+* barons
+* vision_score_total
+* item_spike_score
+* grouping_score
+* bot_side_pressure
+* top_side_pressure
+
+---
+
+### draft_features
+
+Columns:
+
+* match_id
+* team_id
+* champion_1..5
+* ban_1..5
+* synergy_score
+* counter_score
+* comfort_score
+* draft_win_label
+
+---
+
+### gank_events
+
+Columns:
+
+* match_id
+* timestamp_ms
+* jungler_participant_id
+* lane_target
+* success_flag
+* kill_count
+* team_id
+
+---
+
+### teamfight_events
+
+Columns:
+
+* match_id
+* start_timestamp_ms
+* end_timestamp_ms
+* winning_team_id
+* gold_swing
+* kills_team_100
+* kills_team_200
+* damage_team_100
+* damage_team_200
+
+---
+
+### ml_model_registry
+
+Columns:
+
+* id
+* model_name
+* version
+* artifact_path
+* features_json
+* metrics_json
+* trained_at
+* is_active
+
+---
+
+# 7. Dashboard System
+
+The frontend presents analytics and predictions to users.
+
+## Player / Team Overview
+
+* win rate
+* role stats
+* champion pool
+* recent trends
+
+## Draft Intelligence Dashboard
+
+* pick rates
+* ban rates
+* synergy graphs
+* counter matchups
+* draft win probability
+
+## Match Timeline Dashboard
+
+* gold advantage graph
+* XP progression
+* objectives timeline
+* item timing
+* win probability curve
+
+## Team Macro Dashboard
+
+* lane pressure
+* jungle paths
+* objective control
+* roam patterns
+* side-control pressure
+
+## Recommendation Dashboard
+
+Examples:
+
+* recommended champion picks
+* rotation improvements
+* weak macro indicators
+* underperforming roles
+
+---
+
+# 8. Map-Based Analytics
+
+Player positions from timeline data are converted into **map regions**.
+
+Regions include:
+
+* top lane
+* mid lane
+* bot lane
+* blue jungle
+* red jungle
+* river
+* dragon area
+* baron area
+
+Derived spatial features:
+
+* lane presence time
+* roam frequency
+* jungle lane entries
+* objective setup positioning
+* team grouping score
+
+Map visualizations include:
+
+* movement heatmaps
+* gank route visualization
+* teamfight location markers
+
+---
+
+# 9. Backend API Structure
+
+## Ingestion
+
+* POST `/ingest/player`
+* POST `/backfill/derived`
+* POST `/backfill/draft-actions`
+* POST `/backfill/timeline`
+
+## Coverage
+
+* GET `/backfill/status`
+* GET `/backfill/draft-actions/status`
+* GET `/backfill/timeline/status`
+
+## Draft Analytics
+
+* GET `/draft/picks`
+* GET `/draft/bans`
+* GET `/draft/synergy`
+* GET `/draft/counters`
+
+## Timeline Analytics
+
+* GET `/timeline/summary/{match_id}`
+* GET `/analytics/ganks`
+* GET `/analytics/teamfights`
+* GET `/analytics/objectives`
+* GET `/analytics/map/heatmap`
+
+## Machine Learning
+
+* POST `/ml/train/draft-win`
+* POST `/ml/train/midgame-win`
+* GET `/ml/models/status`
+* POST `/ml/predict/draft-win`
+* POST `/ml/predict/midgame-win`
+* POST `/ml/evaluate/model`
+
+## Debug
+
+* GET `/debug/db-summary`
+* GET `/debug/first-match-positions`
+* POST `/debug/smoke-run`
+
+---
+
+# 10. Development Phases
+
+## Phase 1 — Data Foundation
+
+* finalize ingestion
+* finalize draft_actions
+* add timeline support
+* create timeline tables
+* coverage endpoints
+
+Deliverable:
+stable ingestion pipeline
+
+---
+
+## Phase 2 — Timeline Processing
+
+* ingest frames and events
+* create map visualization script
+* define map regions
+* position classification
+
+Deliverable:
+timeline dataset ready
+
+---
+
+## Phase 3 — Analytics Layer
+
+* draft analytics
+* gank detection
+* objective metrics
+* team snapshots
+* feature tables
+
+Deliverable:
+advanced analytics endpoints
+
+---
+
+## Phase 4 — Machine Learning
+
+* dataset builder
+* baseline models
+* evaluation metrics
+* prediction endpoints
+
+Deliverable:
+trained prediction models
+
+---
+
+## Phase 5 — Dashboard
+
+* draft dashboard
+* timeline dashboard
+* macro dashboard
+* recommendation panels
+
+Deliverable:
+full analytics interface
+
+---
+
+## Phase 6 — Testing and Finalization
+
+* unit tests
+* integration tests
+* stress tests
+* architecture documentation
+* deployment
+
+Deliverable:
+complete capstone system
+
+---
+
+# 11. Team Roles
+
+### Backend Engineer
+
+* ingestion
+* database
+* migrations
+* timeline parsing
+
+### Analytics Engineer
+
+* feature engineering
+* spatial metrics
+* draft analytics
+* event detection
+
+### ML Engineer
+
+* dataset creation
+* model training
+* evaluation
+* prediction services
+
+### Frontend Engineer
+
+* dashboards
+* charts
+* visualization
+* API integration
+
+---
+
+# 12. Final Outcome
+
+The finished system provides:
+
+* automated Riot data ingestion
+* large-scale match dataset
+* draft intelligence analysis
+* timeline-based game modeling
+* spatial map analytics
+* predictive machine learning models
+* interactive dashboards for strategic insights
+
+This demonstrates a **complete data engineering + ML-powered analytics platform**, satisfying the complexity expected of a software engineering capstone project.
