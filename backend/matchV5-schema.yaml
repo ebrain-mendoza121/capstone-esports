@@ -1,0 +1,283 @@
+schema_name: riot_match_v5_analytics
+notes:
+  - Use match_id as the canonical match key (text).
+  - Store raw JSON (jsonb) for forward compatibility.
+  - Timeline tables can be large; consider partitioning by match_id or date.
+
+tables:
+  matches:
+    pk: [match_id]
+    columns:
+      match_id: {type: text, nullable: false}
+      data_version: {type: text, nullable: true}
+      platform_id: {type: text, nullable: true}
+      queue_id: {type: int, nullable: true}
+      game_mode: {type: text, nullable: true}
+      game_type: {type: text, nullable: true}
+      map_id: {type: int, nullable: true}
+      game_name: {type: text, nullable: true}
+      game_version: {type: text, nullable: true}
+      tournament_code: {type: text, nullable: true}
+      end_of_game_result: {type: text, nullable: true}
+      game_creation: {type: bigint, nullable: true}          # ms epoch
+      game_start_timestamp: {type: bigint, nullable: true}   # ms epoch
+      game_end_timestamp: {type: bigint, nullable: true}     # ms epoch (may be missing)
+      game_duration: {type: bigint, nullable: true}          # seconds or ms depending on payload
+      ingested_at: {type: timestamptz, nullable: false, default: now()}
+      raw_match_json: {type: jsonb, nullable: true}
+    indexes:
+      - [queue_id, game_start_timestamp]
+      - [platform_id, game_start_timestamp]
+      - [game_version]
+
+  match_teams:
+    pk: [match_id, team_id]
+    fks:
+      - {columns: [match_id], ref_table: matches, ref_columns: [match_id]}
+    columns:
+      match_id: {type: text, nullable: false}
+      team_id: {type: int, nullable: false}                  # 100/200
+      win: {type: boolean, nullable: true}
+
+      baron_first: {type: boolean, nullable: true}
+      baron_kills: {type: int, nullable: true}
+      dragon_first: {type: boolean, nullable: true}
+      dragon_kills: {type: int, nullable: true}
+      rift_herald_first: {type: boolean, nullable: true}
+      rift_herald_kills: {type: int, nullable: true}
+      tower_first: {type: boolean, nullable: true}
+      tower_kills: {type: int, nullable: true}
+      inhibitor_first: {type: boolean, nullable: true}
+      inhibitor_kills: {type: int, nullable: true}
+      champion_first: {type: boolean, nullable: true}
+      champion_kills: {type: int, nullable: true}
+      horde_first: {type: boolean, nullable: true}
+      horde_kills: {type: int, nullable: true}
+
+  match_team_bans:
+    pk: [match_id, team_id, pick_turn]
+    fks:
+      - {columns: [match_id, team_id], ref_table: match_teams, ref_columns: [match_id, team_id]}
+    columns:
+      match_id: {type: text, nullable: false}
+      team_id: {type: int, nullable: false}
+      pick_turn: {type: int, nullable: false}
+      champion_id: {type: int, nullable: false}
+    indexes:
+      - [champion_id]
+      - [match_id, team_id]
+
+  match_participants:
+    pk: [match_id, participant_id]
+    fks:
+      - {columns: [match_id], ref_table: matches, ref_columns: [match_id]}
+      - {columns: [match_id, team_id], ref_table: match_teams, ref_columns: [match_id, team_id]}
+    columns:
+      match_id: {type: text, nullable: false}
+      participant_id: {type: int, nullable: false}           # 1..10
+      puuid: {type: text, nullable: false}
+
+      summoner_id: {type: text, nullable: true}
+      summoner_name: {type: text, nullable: true}
+      riot_id_game_name: {type: text, nullable: true}
+      riot_id_tagline: {type: text, nullable: true}
+      profile_icon: {type: int, nullable: true}
+      summoner_level: {type: int, nullable: true}
+
+      team_id: {type: int, nullable: true}
+      team_position: {type: text, nullable: true}
+      individual_position: {type: text, nullable: true}
+      lane: {type: text, nullable: true}
+      role: {type: text, nullable: true}
+
+      champion_id: {type: int, nullable: true}
+      champion_name: {type: text, nullable: true}
+      champ_level: {type: int, nullable: true}
+      champ_experience: {type: int, nullable: true}
+      champion_transform: {type: int, nullable: true}
+
+      win: {type: boolean, nullable: true}
+      game_ended_in_surrender: {type: boolean, nullable: true}
+      game_ended_in_early_surrender: {type: boolean, nullable: true}
+      team_early_surrendered: {type: boolean, nullable: true}
+
+      raw_participant_json: {type: jsonb, nullable: true}
+    indexes:
+      - [puuid]
+      - [match_id, puuid]
+      - [champion_id]
+      - [team_id, team_position]
+
+  participant_stats:
+    pk: [match_id, participant_id]
+    fks:
+      - {columns: [match_id, participant_id], ref_table: match_participants, ref_columns: [match_id, participant_id]}
+    columns:
+      match_id: {type: text, nullable: false}
+      participant_id: {type: int, nullable: false}
+
+      kills: {type: int, nullable: true}
+      deaths: {type: int, nullable: true}
+      assists: {type: int, nullable: true}
+      double_kills: {type: int, nullable: true}
+      triple_kills: {type: int, nullable: true}
+      quadra_kills: {type: int, nullable: true}
+      penta_kills: {type: int, nullable: true}
+      unreal_kills: {type: int, nullable: true}
+
+      gold_earned: {type: int, nullable: true}
+      gold_spent: {type: int, nullable: true}
+
+      total_minions_killed: {type: int, nullable: true}
+      neutral_minions_killed: {type: int, nullable: true}
+      total_ally_jungle_minions_killed: {type: int, nullable: true}
+      total_enemy_jungle_minions_killed: {type: int, nullable: true}
+
+      total_damage_dealt: {type: int, nullable: true}
+      total_damage_dealt_to_champions: {type: int, nullable: true}
+      total_damage_taken: {type: int, nullable: true}
+
+      physical_damage_dealt: {type: int, nullable: true}
+      physical_damage_dealt_to_champions: {type: int, nullable: true}
+      physical_damage_taken: {type: int, nullable: true}
+      magic_damage_dealt: {type: int, nullable: true}
+      magic_damage_dealt_to_champions: {type: int, nullable: true}
+      magic_damage_taken: {type: int, nullable: true}
+      true_damage_dealt: {type: int, nullable: true}
+      true_damage_dealt_to_champions: {type: int, nullable: true}
+      true_damage_taken: {type: int, nullable: true}
+
+      baron_kills: {type: int, nullable: true}
+      dragon_kills: {type: int, nullable: true}
+      turret_kills: {type: int, nullable: true}
+      inhibitor_kills: {type: int, nullable: true}
+      nexus_kills: {type: int, nullable: true}
+
+      vision_score: {type: int, nullable: true}
+      wards_placed: {type: int, nullable: true}
+      wards_killed: {type: int, nullable: true}
+      detector_wards_placed: {type: int, nullable: true}
+      vision_wards_bought_in_game: {type: int, nullable: true}
+      sight_wards_bought_in_game: {type: int, nullable: true}
+
+      time_ccing_others: {type: int, nullable: true}
+      total_time_cc_dealt: {type: int, nullable: true}
+      total_time_spent_dead: {type: int, nullable: true}
+      longest_time_spent_living: {type: int, nullable: true}
+
+      total_heal: {type: int, nullable: true}
+      total_heals_on_teammates: {type: int, nullable: true}
+      total_damage_shielded_on_teammates: {type: int, nullable: true}
+      total_units_healed: {type: int, nullable: true}
+
+      spell1_casts: {type: int, nullable: true}
+      spell2_casts: {type: int, nullable: true}
+      spell3_casts: {type: int, nullable: true}
+      spell4_casts: {type: int, nullable: true}
+      summoner1_casts: {type: int, nullable: true}
+      summoner2_casts: {type: int, nullable: true}
+
+      item0: {type: int, nullable: true}
+      item1: {type: int, nullable: true}
+      item2: {type: int, nullable: true}
+      item3: {type: int, nullable: true}
+      item4: {type: int, nullable: true}
+      item5: {type: int, nullable: true}
+      item6: {type: int, nullable: true}
+      items_purchased: {type: int, nullable: true}
+      consumables_purchased: {type: int, nullable: true}
+
+  participant_perks:
+    pk: [match_id, participant_id]
+    fks:
+      - {columns: [match_id, participant_id], ref_table: match_participants, ref_columns: [match_id, participant_id]}
+    columns:
+      match_id: {type: text, nullable: false}
+      participant_id: {type: int, nullable: false}
+      stat_defense: {type: int, nullable: true}
+      stat_flex: {type: int, nullable: true}
+      stat_offense: {type: int, nullable: true}
+
+  participant_perk_styles:
+    pk: [match_id, participant_id, style_id]
+    fks:
+      - {columns: [match_id, participant_id], ref_table: match_participants, ref_columns: [match_id, participant_id]}
+    columns:
+      match_id: {type: text, nullable: false}
+      participant_id: {type: int, nullable: false}
+      style_id: {type: int, nullable: false}
+      description: {type: text, nullable: true}
+
+  participant_perk_selections:
+    pk: [match_id, participant_id, style_id, perk]
+    fks:
+      - {columns: [match_id, participant_id, style_id], ref_table: participant_perk_styles, ref_columns: [match_id, participant_id, style_id]}
+    columns:
+      match_id: {type: text, nullable: false}
+      participant_id: {type: int, nullable: false}
+      style_id: {type: int, nullable: false}
+      perk: {type: int, nullable: false}
+      var1: {type: int, nullable: true}
+      var2: {type: int, nullable: true}
+      var3: {type: int, nullable: true}
+
+  participant_challenges:
+    pk: [match_id, participant_id]
+    fks:
+      - {columns: [match_id, participant_id], ref_table: match_participants, ref_columns: [match_id, participant_id]}
+    columns:
+      match_id: {type: text, nullable: false}
+      participant_id: {type: int, nullable: false}
+      challenges_json: {type: jsonb, nullable: true}
+
+  match_timelines:
+    pk: [match_id]
+    fks:
+      - {columns: [match_id], ref_table: matches, ref_columns: [match_id]}
+    columns:
+      match_id: {type: text, nullable: false}
+      data_version: {type: text, nullable: true}
+      frame_interval: {type: bigint, nullable: true}
+      end_of_game_result: {type: text, nullable: true}
+      raw_timeline_json: {type: jsonb, nullable: true}
+
+  timeline_events:
+    pk: [event_id]
+    fks:
+      - {columns: [match_id], ref_table: match_timelines, ref_columns: [match_id]}
+    columns:
+      event_id: {type: bigserial, nullable: false}
+      match_id: {type: text, nullable: false}
+      timestamp: {type: bigint, nullable: true}              # ms since game start
+      real_timestamp: {type: bigint, nullable: true}
+      type: {type: text, nullable: true}
+      raw_event_json: {type: jsonb, nullable: false}
+    indexes:
+      - [match_id, timestamp]
+      - [match_id, type]
+
+  timeline_participant_frames:
+    pk: [match_id, frame_timestamp, participant_id]
+    fks:
+      - {columns: [match_id], ref_table: match_timelines, ref_columns: [match_id]}
+    columns:
+      match_id: {type: text, nullable: false}
+      frame_timestamp: {type: int, nullable: false}
+      participant_id: {type: int, nullable: false}
+
+      position_x: {type: int, nullable: true}
+      position_y: {type: int, nullable: true}
+
+      current_gold: {type: int, nullable: true}
+      total_gold: {type: int, nullable: true}
+      gold_per_second: {type: int, nullable: true}
+
+      xp: {type: int, nullable: true}
+      level: {type: int, nullable: true}
+
+      minions_killed: {type: int, nullable: true}
+      jungle_minions_killed: {type: int, nullable: true}
+      time_enemy_spent_controlled: {type: int, nullable: true}
+
+      champion_stats_json: {type: jsonb, nullable: true}
+      damage_stats_json: {type: jsonb, nullable: true}

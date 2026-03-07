@@ -7,6 +7,7 @@ from app.models.match import Match
 from app.models.participant_stats import ParticipantStats
 from app.models.team_objectives import TeamObjectives
 from app.models.team_bans import TeamBans
+from app.models.draft_actions import DraftActions, ActionType, DraftPhase
 from app.models.derived_metrics import DerivedMetrics
 from app.services.derived_metrics_calculator import (
     compute_derived_metrics, 
@@ -16,6 +17,15 @@ from app.services.derived_metrics_calculator import (
 
 # Set up logger
 logger = logging.getLogger(__name__)
+
+# Role to turn mapping for deterministic pick order
+ROLE_TURN = {
+    "TOP": 1,
+    "JUNGLE": 2,
+    "MIDDLE": 3,
+    "BOTTOM": 4,
+    "UTILITY": 5,
+}
 
 
 def upsert_player(session: Session, puuid: str, riot_id: str, tag_line: str, routing: str) -> Player:
@@ -61,6 +71,9 @@ def insert_match_bundle_for_player(session: Session, match_json: dict, tracked_p
     
     # Normalize game duration (handles patch 11.20 change)
     game_duration_seconds = normalize_game_duration(info)
+
+    # Delete existing draft_actions for this match (in case of re-ingestion)
+    session.query(DraftActions).filter(DraftActions.match_id == match_id).delete()
 
     # Insert match
     m = Match(
@@ -139,8 +152,47 @@ def insert_match_bundle_for_player(session: Session, match_json: dict, tracked_p
                 )
                 session.add(tb)
                 ban_count += 1
+                
+                # Insert into draft_actions for bans
+                da_ban = DraftActions(
+                    match_id=match_id,
+                    team_id=team_id,
+                    action_type=ActionType.BAN,
+                    phase=DraftPhase.BAN,
+                    champion_id=champion_id,
+                    role=None,  # Bans don't have roles
+                    turn=pick_turn,
+                    action_order=None,  # Can be computed later if needed
+                )
+                session.add(da_ban)
         
         logger.info(f"Inserted {ban_count} bans for team {team_id}")
+
+    # Insert picks into draft_actions from participants
+    pick_count = 0
+    for p in all_participants:
+        p_team_id = p.get("teamId")
+        champion_id = p.get("championId")
+        team_position = p.get("teamPosition") or p.get("individualPosition")
+        
+        # Only insert if we have valid data
+        if p_team_id and champion_id and team_position and team_position in ROLE_TURN:
+            turn = ROLE_TURN[team_position]
+            
+            da_pick = DraftActions(
+                match_id=match_id,
+                team_id=p_team_id,
+                action_type=ActionType.PICK,
+                phase=DraftPhase.PICK,
+                champion_id=champion_id,
+                role=team_position,
+                turn=turn,
+                action_order=None,  # Can be computed later if needed
+            )
+            session.add(da_pick)
+            pick_count += 1
+    
+    logger.info(f"Inserted {pick_count} picks for match {match_id}")
 
     # Compute and insert derived metrics using normalized duration
     team_participants = extract_team_participants(all_participants, team_id)

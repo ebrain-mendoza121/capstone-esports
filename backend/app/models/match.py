@@ -19,3 +19,4 @@ class Match(Base):
     team_objectives = relationship("TeamObjectives", back_populates="match")
     team_bans = relationship("TeamBans", back_populates="match", cascade="all, delete-orphan")
     derived_metrics = relationship("DerivedMetrics", back_populates="match", cascade="all, delete-orphan")
+    draft_actions = relationship("DraftActions", back_populates="match", cascade="all, delete-orphan")
