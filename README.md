@@ -1,90 +1,73 @@
 # Esports Analytics Platform
 
-League of Legends analytics platform that ingests player match data from the Riot Games API and provides REST API endpoints for querying player statistics and performance metrics.
+This repository contains:
+- `frontend/`: Next.js application
+- `backend/`: FastAPI service configured to use Supabase Postgres via `DATABASE_URL`
 
-## Quick Start
+## Backend Quick Start (Supabase)
 
 ```bash
-# Start database
-cd infra && docker-compose up -d
-
-# Setup backend
 cd backend
-python3.11 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+cp .env.example .env
+```
 
-# Configure environment (create backend/.env)
+Edit `backend/.env` and set your Supabase values:
+
+```env
+DATABASE_URL=postgresql+psycopg://postgres.<project-ref>:<db-password>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+PRISMA_DATABASE_URL=postgresql://postgres.<project-ref>:<db-password>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+CORS_ORIGINS=http://localhost:3000,http://localhost:5173
 RIOT_API_KEY=YOUR_RIOT_DEV_KEY
-DATABASE_URL=postgresql+psycopg://esports:esports@localhost:5432/esports
-CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+```
 
-# Run migrations
-alembic upgrade head
+Start the backend:
 
-# Start server (from backend directory)
+```bash
+cd backend
+source .venv/bin/activate
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-API Documentation: http://localhost:8000/docs
+API docs: http://localhost:8000/docs
 
-## Documentation
+## Database Migrations (Prisma)
 
-- **SETUP_GUIDE.md** - Complete setup instructions for local and production environments
-- **TECHNICAL_DOCUMENTATION.md** - Technical reference (architecture, algorithms, API endpoints, database models)
-- **README.md** - This file (quick start and overview)
-
-## Features
-
-- Player ingestion via Riot API with automatic retry logic
-- Match history storage with participant statistics
-- Derived metrics calculation (KDA, CS/min, gold/min, kill participation, damage share, vision/min)
-- Backfill system for historical data
-- Coverage tracking (≥95% goal)
-- PostgreSQL with Alembic migrations
-
-## Tech Stack
-
-- Python 3.11, FastAPI, PostgreSQL 16, SQLAlchemy 2.0, Alembic, httpx, Uvicorn
-
-## Example Usage
+Prisma is configured in `backend/prisma/schema.prisma` and reads `PRISMA_DATABASE_URL` from `backend/.env`.
 
 ```bash
-# Ingest player data
-curl -X POST http://localhost:8000/ingest/player \
-  -H "Content-Type: application/json" \
-  -d '{"gameName": "Doublelift", "tagLine": "NA1", "platform": "NA", "count": 20}'
-
-# Check metrics coverage
-curl http://localhost:8000/backfill/status
-
-# Get player metrics
-curl http://localhost:8000/metrics/player/{puuid}
+cd backend
+npm install
+npm run prisma:validate
+npm run prisma:pull
+npm run prisma:migrate:dev -- --name <change_name>
 ```
+
+Notes:
+- Use the Supabase session pooler URL (`aws-0-<region>.pooler.supabase.com:5432`).
+- `DATABASE_URL` is for FastAPI/SQLAlchemy (`postgresql+psycopg://...`).
+- `PRISMA_DATABASE_URL` is for Prisma (`postgresql://...`).
+- For existing Supabase schemas, run `npm run prisma:pull` first, then create migration steps as needed.
+- For production migration rollout, use `npm run prisma:migrate:deploy`.
+
+## Current Backend Endpoints
+
+- `GET /health`
+- `GET /health/db`
 
 ## Project Structure
 
+```text
+capstone-esports/
+├── frontend/
+└── backend/
+    ├── app/
+    │   ├── api/routes/
+    │   ├── core/
+    │   └── db/
+    ├── prisma/
+    ├── package.json
+    └── requirements.txt
 ```
-esports-capstone/
-├── backend/
-│   ├── app/
-│   │   ├── api/routes/      # API endpoints
-│   │   ├── core/            # Settings
-│   │   ├── db/              # Database operations
-│   │   ├── models/          # SQLAlchemy models
-│   │   ├── schemas/         # Pydantic schemas
-│   │   └── services/        # Business logic
-│   ├── alembic/             # Database migrations
-│   └── requirements.txt
-└── infra/
-    └── docker-compose.yml   # PostgreSQL container
-```
-
-## Need Help?
-
-See **SETUP_GUIDE.md** for:
-- Detailed setup instructions
-- Environment configuration (local vs production)
-- Troubleshooting common issues
-- Database management
-- Development workflow

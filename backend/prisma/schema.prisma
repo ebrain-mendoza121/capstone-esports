@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("PRISMA_DATABASE_URL")
+}
+
+model alembic_version {
+  version_num String @id(map: "alembic_version_pkc") @db.VarChar(32)
+
+  @@ignore
+}
+
+model derived_metrics {
+  id                 Int     @id @default(autoincrement())
+  match_id           String  @db.VarChar
+  puuid              String  @db.VarChar
+  kda                Float?
+  cs_per_min         Float?
+  gold_per_min       Float?
+  kill_participation Float?
+  damage_share       Float?
+  vision_per_min     Float?
+  matches            matches @relation(fields: [match_id], references: [match_id], onDelete: Cascade, onUpdate: NoAction)
+  players            players @relation(fields: [puuid], references: [puuid], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([match_id, puuid], map: "uq_derived_metrics_match_puuid")
+  @@index([match_id], map: "ix_derived_metrics_match_id")
+  @@index([puuid], map: "ix_derived_metrics_puuid")
+}
+
+model matches {
+  match_id          String              @id @db.VarChar(64)
+  game_creation     BigInt
+  game_duration     Int
+  queue_id          Int
+  patch_version     String?             @db.VarChar(32)
+  created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  derived_metrics   derived_metrics[]
+  participant_stats participant_stats[]
+  team_objectives   team_objectives[]
+
+  @@index([game_creation], map: "ix_matches_game_creation")
+  @@index([queue_id], map: "ix_matches_queue_id")
+}
+
+model participant_stats {
+  id           Int      @id @default(autoincrement())
+  match_id     String   @db.VarChar(64)
+  player_id    Int
+  team_id      Int
+  champion     String?  @db.VarChar(64)
+  role         String?  @db.VarChar(32)
+  kills        Int
+  deaths       Int
+  assists      Int
+  gold_earned  Int
+  total_damage Int
+  cs           Int
+  vision_score Int
+  win          Boolean?
+  matches      matches  @relation(fields: [match_id], references: [match_id], onDelete: Cascade, onUpdate: NoAction)
+  players      players  @relation(fields: [player_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([champion], map: "ix_participant_stats_champion")
+  @@index([match_id], map: "ix_participant_stats_match_id")
+  @@index([player_id], map: "ix_participant_stats_player_id")
+}
+
+model players {
+  id                Int                 @id @default(autoincrement())
+  riot_id           String              @db.VarChar(64)
+  tag_line          String              @db.VarChar(16)
+  puuid             String              @unique(map: "ix_players_puuid") @db.VarChar(128)
+  region            String              @db.VarChar(16)
+  created_at        DateTime            @default(now()) @db.Timestamptz(6)
+  derived_metrics   derived_metrics[]
+  participant_stats participant_stats[]
+}
+
+model team_objectives {
+  id       Int     @id @default(autoincrement())
+  match_id String  @db.VarChar(64)
+  team_id  Int
+  towers   Int
+  dragons  Int
+  barons   Int
+  win_flag Boolean
+  matches  matches @relation(fields: [match_id], references: [match_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([match_id], map: "ix_team_objectives_match_id")
+}
