@@ -51,6 +51,7 @@ model matches {
   team_bans             team_bans[]
   match_timelines       match_timelines?
   draft_actions         draft_actions[]
+  participant_perks     participant_perks[]
 
   @@index([game_creation], map: "ix_matches_game_creation")
   @@index([queue_id], map: "ix_matches_queue_id")
@@ -143,6 +144,7 @@ model players {
   created_at        DateTime            @default(now()) @db.Timestamptz(6)
   derived_metrics   derived_metrics[]
   participant_stats participant_stats[]
+  participant_perks participant_perks[]
 }
 
 model team_objectives {
@@ -174,6 +176,7 @@ model match_timelines {
   raw_timeline_json     Json?
   matches               matches                      @relation(fields: [match_id], references: [match_id], onDelete: Cascade, onUpdate: NoAction)
   participant_frames    timeline_participant_frames[]
+  timeline_events       timeline_events[]
 }
 
 model timeline_participant_frames {
@@ -194,6 +197,19 @@ model timeline_participant_frames {
 
   @@index([match_id, frame_timestamp], map: "ix_tpf_match_ts")
   @@index([match_id, participant_id], map: "ix_tpf_match_participant")
+}
+
+model timeline_events {
+  event_id         BigInt   @id @default(autoincrement())
+  match_id         String   @db.VarChar(64)
+  timestamp        BigInt?
+  real_timestamp   BigInt?
+  type             String?  @db.VarChar(64)
+  raw_event_json   Json
+  match_timelines  match_timelines @relation(fields: [match_id], references: [match_id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([match_id, timestamp], map: "ix_timeline_events_match_ts")
+  @@index([match_id, type], map: "ix_timeline_events_match_type")
 }
 
 model draft_actions {
@@ -218,5 +234,33 @@ model draft_actions {
   @@index([match_id, team_id, phase], map: "ix_draft_actions_match_team_phase")
   @@index([match_id, phase, turn], map: "ix_draft_actions_match_phase_turn")
   @@index([match_id, action_order], map: "ix_draft_actions_match_order")
+}
+
+model participant_perks {
+  id             Int      @id @default(autoincrement())
+  match_id       String   @db.VarChar(64)
+  player_id      Int
+  // Primary rune path
+  primary_style  Int?
+  keystone       Int?
+  primary_slot1  Int?
+  primary_slot2  Int?
+  primary_slot3  Int?
+  // Secondary rune path
+  sub_style      Int?
+  sub_slot1      Int?
+  sub_slot2      Int?
+  // Stat shards
+  stat_offense   Int?
+  stat_flex      Int?
+  stat_defense   Int?
+  matches        matches  @relation(fields: [match_id], references: [match_id], onDelete: Cascade, onUpdate: NoAction)
+  players        players  @relation(fields: [player_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([match_id, player_id], map: "uq_participant_perks_match_player")
+  @@index([match_id], map: "ix_participant_perks_match_id")
+  @@index([player_id], map: "ix_participant_perks_player_id")
+  @@index([keystone], map: "ix_participant_perks_keystone")
+  @@index([primary_style], map: "ix_participant_perks_primary_style")
 }
 

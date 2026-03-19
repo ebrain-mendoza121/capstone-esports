@@ -16,6 +16,7 @@ import app.models.team_bans          # noqa: F401
 import app.models.derived_metrics    # noqa: F401
 import app.models.match_timeline     # noqa: F401
 import app.models.draft_actions       # noqa: F401
+import app.models.participant_perks   # noqa: F401
 
 settings = get_settings()
 

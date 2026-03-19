@@ -10,13 +10,14 @@ from app.models.participant_stats import ParticipantStats
 from app.models.derived_metrics import DerivedMetrics
 from app.models.team_bans import TeamBans
 from app.models.draft_actions import DraftActions
+from app.models.participant_perks import ParticipantPerks
 from app.services.riot_client import RiotClient
 from app.services.derived_metrics_calculator import (
     compute_derived_metrics,
     extract_team_participants,
     normalize_game_duration,
 )
-from app.db.crud_ingest import insert_draft_actions
+from app.db.crud_ingest import insert_draft_actions, insert_participant_perks
 
 router = APIRouter(prefix="/backfill", tags=["backfill"])
 
@@ -226,5 +227,100 @@ def draft_actions_status(db: Session = Depends(get_db)):
         "total_drafted_matches": total_drafted,
         "with_draft_actions": with_actions,
         "missing_draft_actions": missing,
+        "coverage_percentage": round(coverage, 2),
+    }
+
+
+@router.post("/participant-perks")
+async def backfill_participant_perks(
+    puuid: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """
+    Backfill participant_perks for matches that have participant_stats but no perks row.
+    Re-fetches match JSON from Riot API for each missing record.
+    Omit `puuid` to run globally.
+    """
+    has_perks_subq = (
+        db.query(ParticipantPerks.match_id, ParticipantPerks.player_id)
+        .subquery()
+    )
+
+    missing_q = (
+        db.query(
+            ParticipantStats.match_id,
+            ParticipantStats.player_id,
+            Player.puuid,
+            Player.region,
+        )
+        .join(Player, Player.id == ParticipantStats.player_id)
+        .outerjoin(
+            has_perks_subq,
+            (has_perks_subq.c.match_id == ParticipantStats.match_id)
+            & (has_perks_subq.c.player_id == ParticipantStats.player_id),
+        )
+        .filter(has_perks_subq.c.match_id == None)  # noqa: E711
+        .order_by(ParticipantStats.match_id)
+    )
+
+    if puuid:
+        missing_q = missing_q.filter(Player.puuid == puuid)
+
+    records = missing_q.all()
+
+    if not records:
+        return {
+            "status": "success",
+            "message": "No matches missing participant perks",
+            "processed": 0,
+            "failed": 0,
+            "failed_matches": [],
+        }
+
+    client = RiotClient()
+    processed = 0
+    failed = 0
+    failed_matches = []
+
+    for match_id, player_id, player_puuid, routing in records:
+        try:
+            match_json = await client.get_match(match_id, routing)
+            info = match_json["info"]
+            all_participants = info.get("participants", [])
+            participant = next(
+                (p for p in all_participants if p.get("puuid") == player_puuid), None
+            )
+            if not participant:
+                failed += 1
+                failed_matches.append(match_id)
+                continue
+            insert_participant_perks(db, match_id, player_id, participant)
+            processed += 1
+        except Exception:
+            failed += 1
+            failed_matches.append(match_id)
+
+    db.commit()
+
+    return {
+        "status": "success" if failed == 0 else "partial",
+        "message": f"Backfilled participant perks for {processed} records",
+        "processed": processed,
+        "failed": failed,
+        "failed_matches": failed_matches[:10],
+    }
+
+
+@router.get("/participant-perks/status")
+def participant_perks_status(db: Session = Depends(get_db)):
+    """Coverage report for participant_perks."""
+    total = db.query(ParticipantStats).count()
+    with_perks = db.query(ParticipantPerks).count()
+    missing = total - with_perks
+    coverage = (with_perks / total * 100) if total > 0 else 0.0
+    return {
+        "total_participant_stats": total,
+        "with_perks": with_perks,
+        "missing_perks": missing,
         "coverage_percentage": round(coverage, 2),
     }

@@ -1,19 +1,24 @@
+import logging
+from typing import Dict, List, Any
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
-from typing import List, Dict, Any
 
 from app.db.session import get_db
 from app.models.player import Player
 from app.models.match import Match
 from app.models.participant_stats import ParticipantStats
 from app.models.team_bans import TeamBans
+from app.services.ddragon import get_champion_map
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
 @router.get("/player/{puuid}/bans")
-def get_player_bans(
+async def get_player_bans(
     puuid: str,
     limit: int = 100,
     db: Session = Depends(get_db),
@@ -55,6 +60,7 @@ def get_player_bans(
         db.query(TeamBans).filter(TeamBans.match_id.in_(match_ids)).all()
     )
 
+    champion_map = await get_champion_map()
     bans_against = []
     bans_by_team = []
 
@@ -63,6 +69,7 @@ def get_player_bans(
         entry = {
             "match_id": ban.match_id,
             "champion_id": ban.champion_id,
+            "champion_name": champion_map.get(ban.champion_id),
             "pick_turn": ban.pick_turn,
         }
         if ban.team_id == player_team:
@@ -75,7 +82,11 @@ def get_player_bans(
         for b in ban_list:
             counts[b["champion_id"]] = counts.get(b["champion_id"], 0) + 1
         return [
-            {"champion_id": cid, "ban_count": cnt}
+            {
+                "champion_id": cid,
+                "champion_name": champion_map.get(cid),
+                "ban_count": cnt,
+            }
             for cid, cnt in sorted(counts.items(), key=lambda x: x[1], reverse=True)
         ][:n]
 
@@ -92,16 +103,18 @@ def get_player_bans(
 
 
 @router.get("/champion/{champion_id}/ban-rate")
-def get_champion_ban_rate(
+async def get_champion_ban_rate(
     champion_id: int,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
     """Ban rate for a specific champion across all stored matches."""
+    champion_map = await get_champion_map()
     total_matches = db.query(func.count(Match.match_id)).scalar()
 
     if total_matches == 0:
         return {
             "champion_id": champion_id,
+            "champion_name": champion_map.get(champion_id),
             "total_matches": 0,
             "times_banned": 0,
             "ban_rate": 0.0,
@@ -117,6 +130,7 @@ def get_champion_ban_rate(
 
     return {
         "champion_id": champion_id,
+        "champion_name": champion_map.get(champion_id),
         "total_matches": total_matches,
         "times_banned": times_banned,
         "ban_rate": round(ban_rate, 2),
@@ -124,11 +138,12 @@ def get_champion_ban_rate(
 
 
 @router.get("/bans/most-banned")
-def get_most_banned_champions(
+async def get_most_banned_champions(
     limit: int = 20,
     db: Session = Depends(get_db),
 ) -> List[Dict[str, Any]]:
     """Most banned champions across all stored matches."""
+    champion_map = await get_champion_map()
     most_banned = (
         db.query(TeamBans.champion_id, func.count(TeamBans.id).label("ban_count"))
         .group_by(TeamBans.champion_id)
@@ -138,6 +153,10 @@ def get_most_banned_champions(
     )
 
     return [
-        {"champion_id": champ_id, "ban_count": count}
+        {
+            "champion_id": champ_id,
+            "champion_name": champion_map.get(champ_id),
+            "ban_count": count,
+        }
         for champ_id, count in most_banned
     ]

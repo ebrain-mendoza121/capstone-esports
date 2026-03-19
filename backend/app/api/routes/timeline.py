@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.match_timeline import MatchTimeline, TimelineParticipantFrame
+from app.models.match_timeline import MatchTimeline, TimelineParticipantFrame, TimelineEvent
 from app.models.player import Player
 
 router = APIRouter(prefix="/timeline", tags=["timeline"])
@@ -25,11 +25,18 @@ def get_timeline_summary(match_id: str, db: Session = Depends(get_db)) -> Dict[s
         .count()
     )
 
+    event_count = (
+        db.query(TimelineEvent)
+        .filter(TimelineEvent.match_id == match_id)
+        .count()
+    )
+
     return {
         "match_id": match_id,
         "frame_interval_ms": tl.frame_interval,
         "end_of_game_result": tl.end_of_game_result,
         "participant_frame_rows": frame_count,
+        "event_rows": event_count,
     }
 
 
@@ -135,4 +142,41 @@ def get_timeline_frames_for_player(
             "jungle_minions_killed": f.jungle_minions_killed,
         }
         for f in frames
+    ]
+
+
+@router.get("/{match_id}/events")
+def get_timeline_events(
+    match_id: str,
+    event_type: Optional[str] = None,
+    limit: int = 1000,
+    db: Session = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    """
+    Returns structured timeline events for a match.
+    Optionally filter by event_type (e.g. CHAMPION_KILL, BUILDING_KILL, ELITE_MONSTER_KILL).
+    Ordered by timestamp ASC. Each row includes the full raw_event_json for detail.
+    """
+    tl = db.query(MatchTimeline).filter(MatchTimeline.match_id == match_id).first()
+    if not tl:
+        raise HTTPException(
+            status_code=404,
+            detail="Timeline not found for this match. Re-ingest with fetch_timeline=true.",
+        )
+
+    q = db.query(TimelineEvent).filter(TimelineEvent.match_id == match_id)
+    if event_type is not None:
+        q = q.filter(TimelineEvent.event_type == event_type.upper())
+
+    events = q.order_by(TimelineEvent.timestamp).limit(limit).all()
+
+    return [
+        {
+            "event_id": e.event_id,
+            "timestamp": e.timestamp,
+            "real_timestamp": e.real_timestamp,
+            "type": e.event_type,
+            "detail": e.raw_event_json,
+        }
+        for e in events
     ]

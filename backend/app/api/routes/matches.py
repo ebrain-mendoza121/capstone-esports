@@ -10,6 +10,7 @@ from app.models.team_bans import TeamBans
 from app.models.derived_metrics import DerivedMetrics
 from app.models.player import Player
 from app.models.draft_actions import DraftActions, ActionType
+from app.models.participant_perks import ParticipantPerks
 
 router = APIRouter(prefix="/matches", tags=["matches"])
 
@@ -90,8 +91,13 @@ def get_match_detail(match_id: str, db: Session = Depends(get_db)) -> Dict[str, 
     )
     bans = db.query(TeamBans).filter(TeamBans.match_id == match_id).all()
     participants = (
-        db.query(ParticipantStats, Player)
+        db.query(ParticipantStats, Player, ParticipantPerks)
         .join(Player, Player.id == ParticipantStats.player_id)
+        .outerjoin(
+            ParticipantPerks,
+            (ParticipantPerks.match_id == ParticipantStats.match_id)
+            & (ParticipantPerks.player_id == ParticipantStats.player_id),
+        )
         .filter(ParticipantStats.match_id == match_id)
         .all()
     )
@@ -157,8 +163,21 @@ def get_match_detail(match_id: str, db: Session = Depends(get_db)) -> Dict[str, 
                 "summoner1_id": ps.summoner1_id,
                 "summoner2_id": ps.summoner2_id,
                 "win": ps.win,
+                "perks": {
+                    "primary_style": pk.primary_style,
+                    "keystone": pk.keystone,
+                    "primary_slot1": pk.primary_slot1,
+                    "primary_slot2": pk.primary_slot2,
+                    "primary_slot3": pk.primary_slot3,
+                    "sub_style": pk.sub_style,
+                    "sub_slot1": pk.sub_slot1,
+                    "sub_slot2": pk.sub_slot2,
+                    "stat_offense": pk.stat_offense,
+                    "stat_flex": pk.stat_flex,
+                    "stat_defense": pk.stat_defense,
+                } if pk else None,
             }
-            for ps, player in participants
+            for ps, player, pk in participants
         ],
     }
 

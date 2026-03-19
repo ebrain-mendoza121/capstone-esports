@@ -27,6 +27,11 @@ class MatchTimeline(Base):
         back_populates="timeline",
         cascade="all, delete-orphan",
     )
+    events = relationship(
+        "TimelineEvent",
+        back_populates="timeline",
+        cascade="all, delete-orphan",
+    )
 
 
 class TimelineParticipantFrame(Base):
@@ -66,4 +71,31 @@ class TimelineParticipantFrame(Base):
     __table_args__ = (
         Index("ix_tpf_match_ts", "match_id", "frame_timestamp"),
         Index("ix_tpf_match_participant", "match_id", "participant_id"),
+    )
+
+
+class TimelineEvent(Base):
+    """
+    One row per event emitted in a timeline frame (kills, objectives, items, etc.).
+    Stores minimal structured fields for querying plus the full raw event JSON
+    for forward compatibility and AI feature extraction.
+    """
+    __tablename__ = "timeline_events"
+
+    event_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    match_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("match_timelines.match_id", ondelete="CASCADE"), nullable=False
+    )
+    timestamp: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)       # ms since game start
+    real_timestamp: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # epoch ms
+    event_type: Mapped[Optional[str]] = mapped_column(
+        "type", String(64), nullable=True
+    )
+    raw_event_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+    timeline = relationship("MatchTimeline", back_populates="events")
+
+    __table_args__ = (
+        Index("ix_timeline_events_match_ts", "match_id", "timestamp"),
+        Index("ix_timeline_events_match_type", "match_id", "type"),
     )

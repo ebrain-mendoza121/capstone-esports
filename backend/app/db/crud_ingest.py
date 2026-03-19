@@ -8,8 +8,9 @@ from app.models.participant_stats import ParticipantStats
 from app.models.team_objectives import TeamObjectives
 from app.models.team_bans import TeamBans
 from app.models.derived_metrics import DerivedMetrics
-from app.models.match_timeline import MatchTimeline, TimelineParticipantFrame
+from app.models.match_timeline import MatchTimeline, TimelineParticipantFrame, TimelineEvent
 from app.models.draft_actions import DraftActions, ActionType, DraftPhase
+from app.models.participant_perks import ParticipantPerks
 from app.services.derived_metrics_calculator import (
     compute_derived_metrics,
     extract_team_participants,
@@ -104,6 +105,64 @@ def insert_draft_actions(session: Session, match_id: str, info: dict) -> None:
                     turn=idx,
                     action_order=None,
                 ))
+def insert_participant_perks(session: Session, match_id: str, player_id: int, participant: dict) -> None:
+    """Insert rune/perk data for the tracked participant.
+
+    Extracts primary style + 4 selections (keystone + 3 slot runes),
+    secondary style + 2 selections, and all 3 stat shards from the
+    participant.perks object in the Riot Match-V5 response.
+    """
+    perks_raw = participant.get("perks") or {}
+    stat_perks = perks_raw.get("statPerks") or {}
+    styles = perks_raw.get("styles") or []
+
+    primary_style: int | None = None
+    keystone: int | None = None
+    primary_slot1: int | None = None
+    primary_slot2: int | None = None
+    primary_slot3: int | None = None
+    sub_style: int | None = None
+    sub_slot1: int | None = None
+    sub_slot2: int | None = None
+
+    for style in styles:
+        description = (style.get("description") or "").lower()
+        style_id = style.get("style")
+        selections = style.get("selections") or []
+        if description == "primarystyle":
+            primary_style = style_id
+            if len(selections) > 0:
+                keystone = selections[0].get("perk")
+            if len(selections) > 1:
+                primary_slot1 = selections[1].get("perk")
+            if len(selections) > 2:
+                primary_slot2 = selections[2].get("perk")
+            if len(selections) > 3:
+                primary_slot3 = selections[3].get("perk")
+        elif description == "substyle":
+            sub_style = style_id
+            if len(selections) > 0:
+                sub_slot1 = selections[0].get("perk")
+            if len(selections) > 1:
+                sub_slot2 = selections[1].get("perk")
+
+    session.add(ParticipantPerks(
+        match_id=match_id,
+        player_id=player_id,
+        primary_style=primary_style,
+        keystone=keystone,
+        primary_slot1=primary_slot1,
+        primary_slot2=primary_slot2,
+        primary_slot3=primary_slot3,
+        sub_style=sub_style,
+        sub_slot1=sub_slot1,
+        sub_slot2=sub_slot2,
+        stat_offense=stat_perks.get("offense"),
+        stat_flex=stat_perks.get("flex"),
+        stat_defense=stat_perks.get("defense"),
+    ))
+
+
 def upsert_player(session: Session, puuid: str, riot_id: str, tag_line: str, routing: str) -> Player:
     """Insert or update a player record. Returns the Player ORM object."""
     player = session.query(Player).filter(Player.puuid == puuid).one_or_none()
@@ -298,6 +357,11 @@ def insert_match_bundle_for_player(
             f"insert_draft_actions skipped for {match_id}: {draft_err}. "
             "Check native_enum=False on the DraftActions model or run `npx prisma db push`."
         )
+    try:
+        with session.begin_nested():
+            insert_participant_perks(session, match_id, player_id, participant)
+    except Exception as perks_err:
+        logger.warning(f"insert_participant_perks skipped for {match_id}: {perks_err}")
 
 
 
@@ -339,6 +403,15 @@ def insert_timeline(session: Session, match_id: str, timeline_json: dict) -> Non
                 level=pf.get("level"),
                 minions_killed=pf.get("minionsKilled"),
                 jungle_minions_killed=pf.get("jungleMinionsKilled"),
+            ))
+
+        for event in frame.get("events", []):
+            session.add(TimelineEvent(
+                match_id=match_id,
+                timestamp=event.get("timestamp"),
+                real_timestamp=event.get("realTimestamp"),
+                event_type=event.get("type"),
+                raw_event_json=event,
             ))
 
     session.flush()

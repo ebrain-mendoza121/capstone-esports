@@ -30,3 +30,4 @@ class Match(Base):
     derived_metrics = relationship("DerivedMetrics", back_populates="match", cascade="all, delete-orphan")
     timeline = relationship("MatchTimeline", back_populates="match", cascade="all, delete-orphan", uselist=False)
     draft_actions = relationship("DraftActions", back_populates="match", cascade="all, delete-orphan")
+    participant_perks = relationship("ParticipantPerks", back_populates="match", cascade="all, delete-orphan")
