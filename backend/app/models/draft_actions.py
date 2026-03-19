@@ -46,13 +46,13 @@ class DraftActions(Base):
     )
 
     action_type: Mapped[ActionType] = mapped_column(
-        SQLEnum(ActionType, name="action_type_enum", create_type=False),
+        SQLEnum(ActionType, name="action_type_enum", create_type=False, native_enum=False),
         nullable=False,
         comment="Action type (PICK or BAN)",
     )
 
     phase: Mapped[DraftPhase] = mapped_column(
-        SQLEnum(DraftPhase, name="draft_phase_enum", create_type=False),
+        SQLEnum(DraftPhase, name="draft_phase_enum", create_type=False, native_enum=False),
         nullable=False,
         comment="Draft phase (PICK or BAN). Typically mirrors action_type.",
     )

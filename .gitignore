@@ -20,3 +20,5 @@ backend/.env.local
 backend/.env.prod
 backend/.env
 frontend/.envc
+
+backend copy

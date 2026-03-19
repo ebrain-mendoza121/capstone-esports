@@ -27,3 +27,4 @@ class Player(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     participant_stats = relationship("ParticipantStats", back_populates="player")
+    derived_metrics = relationship("DerivedMetrics", back_populates="player", cascade="all, delete-orphan", foreign_keys="DerivedMetrics.puuid", primaryjoin="Player.puuid == DerivedMetrics.puuid")

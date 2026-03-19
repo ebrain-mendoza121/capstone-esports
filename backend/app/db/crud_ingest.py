@@ -1,0 +1,345 @@
+from sqlalchemy.orm import Session
+from sqlalchemy.dialects.postgresql import insert
+import logging
+
+from app.models.player import Player
+from app.models.match import Match
+from app.models.participant_stats import ParticipantStats
+from app.models.team_objectives import TeamObjectives
+from app.models.team_bans import TeamBans
+from app.models.derived_metrics import DerivedMetrics
+from app.models.match_timeline import MatchTimeline, TimelineParticipantFrame
+from app.models.draft_actions import DraftActions, ActionType, DraftPhase
+from app.services.derived_metrics_calculator import (
+    compute_derived_metrics,
+    extract_team_participants,
+    normalize_game_duration,
+)
+
+logger = logging.getLogger(__name__)
+
+# Maps Riot API teamPosition values to a deterministic per-team turn number.
+# Used to populate draft_actions.turn for the PICK phase.
+ROLE_TO_TURN: dict = {
+    "TOP": 1,
+    "JUNGLE": 2,
+    "MIDDLE": 3,
+    "BOTTOM": 4,
+    "UTILITY": 5,
+}
+
+
+def insert_draft_actions(session: Session, match_id: str, info: dict) -> None:
+    """Insert draft actions (bans and picks) for a match.
+
+    Bans: sourced from teams[].bans[], turn = pickTurn (1-5 per team).
+    Picks: sourced from participants[], turn = ROLE_TO_TURN mapping.
+    If full role data is unavailable (e.g. ARAM), falls back to participantId ordering.
+    Called from insert_match_bundle_for_player and the backfill endpoint.
+    """
+    all_participants = info.get("participants", [])
+
+    # Group participants by team for the pick phase
+    by_team: dict = {100: [], 200: []}
+    for p in all_participants:
+        tid = p.get("teamId")
+        if tid in by_team:
+            by_team[tid].append(p)
+
+    # BAN phase — one row per non-empty ban slot per team
+    for team in info.get("teams", []):
+        team_id = team.get("teamId", 0)
+        for ban in team.get("bans", []):
+            champion_id = ban.get("championId")
+            pick_turn = ban.get("pickTurn")
+            if champion_id is None or champion_id == -1 or pick_turn is None:
+                continue
+            session.add(DraftActions(
+                match_id=match_id,
+                team_id=team_id,
+                action_type=ActionType.BAN,
+                phase=DraftPhase.BAN,
+                champion_id=champion_id,
+                role=None,
+                turn=pick_turn,
+                action_order=None,
+            ))
+
+    # PICK phase — one row per participant
+    for team_id, players in by_team.items():
+        if not players:
+            continue
+
+        # Use role-based turns only if all 5 canonical positions are filled
+        positions = {(p.get("teamPosition") or "").upper().strip() for p in players}
+        use_role_turns = positions == {"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"}
+
+        if use_role_turns:
+            for p in players:
+                pos = p.get("teamPosition", "").upper().strip()
+                session.add(DraftActions(
+                    match_id=match_id,
+                    team_id=team_id,
+                    action_type=ActionType.PICK,
+                    phase=DraftPhase.PICK,
+                    champion_id=p.get("championId", 0),
+                    role=pos,
+                    turn=ROLE_TO_TURN[pos],
+                    action_order=None,
+                ))
+        else:
+            # Fallback: sort by participantId, assign sequential turns 1-5
+            for idx, p in enumerate(
+                sorted(players, key=lambda x: x.get("participantId", 0)),
+                start=1,
+            ):
+                pos = (p.get("teamPosition") or "").upper().strip()
+                session.add(DraftActions(
+                    match_id=match_id,
+                    team_id=team_id,
+                    action_type=ActionType.PICK,
+                    phase=DraftPhase.PICK,
+                    champion_id=p.get("championId", 0),
+                    role=pos if pos in ROLE_TO_TURN else None,
+                    turn=idx,
+                    action_order=None,
+                ))
+def upsert_player(session: Session, puuid: str, riot_id: str, tag_line: str, routing: str) -> Player:
+    """Insert or update a player record. Returns the Player ORM object."""
+    player = session.query(Player).filter(Player.puuid == puuid).one_or_none()
+    if player:
+        player.riot_id = riot_id
+        player.tag_line = tag_line
+        player.region = routing
+        session.flush()
+        return player
+
+    player = Player(puuid=puuid, riot_id=riot_id, tag_line=tag_line, region=routing)
+    session.add(player)
+    session.flush()
+    return player
+
+
+def match_exists(session: Session, match_id: str) -> bool:
+    return session.query(Match).filter(Match.match_id == match_id).first() is not None
+
+
+def insert_match_bundle_for_player(
+    session: Session,
+    match_json: dict,
+    tracked_puuid: str,
+    player_id: int,
+) -> None:
+    """
+    Insert a full match bundle for all 6 core tables:
+    matches, participant_stats, team_objectives, team_bans, derived_metrics.
+
+    Populates all extended fields from the YAML schema including items,
+    damage type breakdown, multi-kills, first objectives, etc.
+    """
+    info = match_json["info"]
+    metadata = match_json["metadata"]
+    match_id = metadata["matchId"]
+
+    game_duration_seconds = normalize_game_duration(info)
+
+    m = Match(
+        match_id=match_id,
+        game_creation=info.get("gameCreation", 0),
+        game_duration=game_duration_seconds,
+        queue_id=info.get("queueId", 0),
+        patch_version=info.get("gameVersion"),
+        game_mode=info.get("gameMode"),
+        game_type=info.get("gameType"),
+        platform_id=info.get("platformId"),
+        game_start_timestamp=info.get("gameStartTimestamp"),
+        game_end_timestamp=info.get("gameEndTimestamp"),
+        end_of_game_result=info.get("endOfGameResult"),
+    )
+    session.add(m)
+    session.flush()
+
+    # Find the tracked participant
+    all_participants = info.get("participants", [])
+    participant = next(
+        (p for p in all_participants if p.get("puuid") == tracked_puuid), None
+    )
+    if participant is None:
+        raise RuntimeError(f"Tracked participant not found in match {match_id}")
+
+    team_id = participant.get("teamId", 0)
+    total_minions = participant.get("totalMinionsKilled") or 0
+    neutral_minions = participant.get("neutralMinionsKilled") or 0
+    cs = int(total_minions + neutral_minions)
+
+    ps = ParticipantStats(
+        match_id=match_id,
+        player_id=player_id,
+        team_id=team_id,
+        # Champion identity
+        champion=participant.get("championName"),
+        champion_id=participant.get("championId"),
+        champ_level=participant.get("champLevel"),
+        role=(
+            participant.get("teamPosition")
+            or participant.get("individualPosition")
+            or participant.get("role")
+        ),
+        # Core KDA
+        kills=participant.get("kills", 0),
+        deaths=participant.get("deaths", 0),
+        assists=participant.get("assists", 0),
+        double_kills=participant.get("doubleKills"),
+        triple_kills=participant.get("tripleKills"),
+        quadra_kills=participant.get("quadraKills"),
+        penta_kills=participant.get("pentaKills"),
+        # Economy
+        gold_earned=participant.get("goldEarned", 0),
+        gold_spent=participant.get("goldSpent"),
+        # CS
+        cs=cs,
+        total_minions_killed=total_minions,
+        neutral_minions_killed=neutral_minions,
+        # Damage
+        total_damage=participant.get("totalDamageDealtToChampions", 0),
+        physical_damage_to_champions=participant.get("physicalDamageDealtToChampions"),
+        magic_damage_to_champions=participant.get("magicDamageDealtToChampions"),
+        true_damage_to_champions=participant.get("trueDamageDealtToChampions"),
+        total_damage_taken=participant.get("totalDamageTaken"),
+        # Vision
+        vision_score=participant.get("visionScore", 0),
+        wards_placed=participant.get("wardsPlaced"),
+        wards_killed=participant.get("wardsKilled"),
+        detector_wards_placed=participant.get("detectorWardsPlaced"),
+        # CC
+        time_ccing_others=participant.get("timeCCingOthers"),
+        # First objectives
+        first_blood_kill=participant.get("firstBloodKill"),
+        first_blood_assist=participant.get("firstBloodAssist"),
+        first_tower_kill=participant.get("firstTowerKill"),
+        first_tower_assist=participant.get("firstTowerAssist"),
+        # Items
+        item0=participant.get("item0"),
+        item1=participant.get("item1"),
+        item2=participant.get("item2"),
+        item3=participant.get("item3"),
+        item4=participant.get("item4"),
+        item5=participant.get("item5"),
+        item6=participant.get("item6"),
+        # Summoner spells
+        summoner1_id=participant.get("summoner1Id"),
+        summoner2_id=participant.get("summoner2Id"),
+        win=participant.get("win"),
+    )
+    session.add(ps)
+
+    # Team objectives + team bans (2 teams)
+    for t in info.get("teams", []):
+        t_id = t.get("teamId", 0)
+        obj = t.get("objectives", {})
+
+        def _obj(key: str) -> dict:
+            return obj.get(key) or {}
+
+        to = TeamObjectives(
+            match_id=match_id,
+            team_id=t_id,
+            win_flag=bool(t.get("win", False)),
+            towers=_obj("tower").get("kills", 0),
+            tower_first=_obj("tower").get("first"),
+            dragons=_obj("dragon").get("kills", 0),
+            dragon_first=_obj("dragon").get("first"),
+            barons=_obj("baron").get("kills", 0),
+            baron_first=_obj("baron").get("first"),
+            rift_herald_kills=_obj("riftHerald").get("kills"),
+            rift_herald_first=_obj("riftHerald").get("first"),
+            inhibitor_kills=_obj("inhibitor").get("kills"),
+            inhibitor_first=_obj("inhibitor").get("first"),
+            champion_kills=_obj("champion").get("kills"),
+            champion_first=_obj("champion").get("first"),
+        )
+        session.add(to)
+
+        for ban in t.get("bans", []):
+            champion_id = ban.get("championId")
+            pick_turn = ban.get("pickTurn")
+            if champion_id and champion_id != -1:
+                session.add(TeamBans(
+                    match_id=match_id,
+                    team_id=t_id,
+                    champion_id=champion_id,
+                    pick_turn=pick_turn,
+                ))
+
+    # Derived metrics (upsert to handle re-ingestion)
+    team_participants = extract_team_participants(all_participants, team_id)
+    metrics = compute_derived_metrics(participant, team_participants, game_duration_seconds)
+
+    stmt = insert(DerivedMetrics).values(
+        match_id=match_id,
+        puuid=tracked_puuid,
+        **metrics,
+    )
+    stmt = stmt.on_conflict_do_update(
+        constraint="uq_derived_metrics_match_puuid",
+        set_=metrics,
+    )
+    session.execute(stmt)
+
+    # Flush participant_stats, team_objectives, team_bans, and derived_metrics first.
+    # Then attempt draft_actions inside a savepoint: if it fails, only the draft rows
+    # are rolled back and the rest of the bundle remains intact.
+    session.flush()
+    try:
+        with session.begin_nested():
+            insert_draft_actions(session, match_id, info)
+    except Exception as draft_err:
+        logger.warning(
+            f"insert_draft_actions skipped for {match_id}: {draft_err}. "
+            "Check native_enum=False on the DraftActions model or run `npx prisma db push`."
+        )
+
+
+
+
+
+
+def insert_timeline(session: Session, match_id: str, timeline_json: dict) -> None:
+    """
+    Store timeline data: raw JSON + parsed participant frames.
+    Called optionally after insert_match_bundle_for_player.
+    """
+    info = timeline_json.get("info", {})
+
+    tl = MatchTimeline(
+        match_id=match_id,
+        frame_interval=info.get("frameInterval"),
+        end_of_game_result=info.get("endOfGameResult"),
+        raw_timeline_json=info,
+    )
+    session.add(tl)
+    session.flush()
+
+    for frame in info.get("frames", []):
+        frame_ts = frame.get("timestamp", 0)
+        participant_frames = frame.get("participantFrames", {})
+
+        for pid_str, pf in participant_frames.items():
+            pos = pf.get("position") or {}
+            session.add(TimelineParticipantFrame(
+                match_id=match_id,
+                frame_timestamp=frame_ts,
+                participant_id=int(pid_str),
+                position_x=pos.get("x"),
+                position_y=pos.get("y"),
+                current_gold=pf.get("currentGold"),
+                total_gold=pf.get("totalGold"),
+                gold_per_second=pf.get("goldPerSecond"),
+                xp=pf.get("xp"),
+                level=pf.get("level"),
+                minions_killed=pf.get("minionsKilled"),
+                jungle_minions_killed=pf.get("jungleMinionsKilled"),
+            ))
+
+    session.flush()
+

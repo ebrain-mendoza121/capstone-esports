@@ -43,6 +43,7 @@ async def ingest_player_route(payload: IngestPlayerRequest, db: Session = Depend
             platform=payload.platform,
             count=payload.count,
             queue=payload.queue,
+            fetch_timeline=payload.fetch_timeline,
         )
         return IngestPlayerResponse(
             puuid=puuid,

@@ -107,3 +107,13 @@ class RiotClient:
         if not isinstance(data, dict):
             raise RiotApiError("Unexpected response for match detail.")
         return data
+
+    async def get_match_timeline(self, match_id: str, routing: str) -> Dict[str, Any]:
+        """Get match timeline (per-minute frames + events)."""
+        data = await self._request_json(
+            routing=routing,
+            path=f"/lol/match/v5/matches/{match_id}/timeline"
+        )
+        if not isinstance(data, dict):
+            raise RiotApiError("Unexpected response for match timeline.")
+        return data
