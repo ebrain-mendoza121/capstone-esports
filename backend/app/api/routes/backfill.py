@@ -17,7 +17,12 @@ from app.services.derived_metrics_calculator import (
     extract_team_participants,
     normalize_game_duration,
 )
-from app.db.crud_ingest import insert_draft_actions, insert_participant_perks
+from app.models.match_timeline import MatchTimeline
+from app.db.crud_ingest import (
+    insert_draft_actions,
+    insert_participant_perks,
+    insert_timeline,
+)
 
 router = APIRouter(prefix="/backfill", tags=["backfill"])
 
@@ -93,9 +98,9 @@ async def backfill_derived_metrics(
             db.execute(stmt)
             processed += 1
 
-        except Exception:
+        except Exception as exc:
             failed += 1
-            failed_matches.append(match_id)
+            failed_matches.append(f"{match_id}: {exc}")
 
     db.commit()
 
@@ -322,5 +327,117 @@ def participant_perks_status(db: Session = Depends(get_db)):
         "total_participant_stats": total,
         "with_perks": with_perks,
         "missing_perks": missing,
+        "coverage_percentage": round(coverage, 2),
+    }
+
+
+@router.post("/timeline")
+async def backfill_timeline(
+    puuid: Optional[str] = None,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+):
+    """
+    Backfill timeline data (match_timelines, timeline_participant_frames, timeline_events)
+    for matches that were ingested without fetch_timeline=True.
+
+    - Queries matches that have no row in match_timelines.
+    - Optionally scope to a single player by passing `puuid`.
+    - `limit` controls how many matches are processed per call (default 20, max 100).
+    - Skips matches that already have timeline data (insert_timeline is idempotent).
+    - Continues on per-match failures; reports them in failed_matches.
+    """
+    limit = min(limit, 100)
+
+    # Sub-query: match_ids that already have timeline data
+    has_timeline_subq = db.query(MatchTimeline.match_id).subquery()
+
+    # Find matches without timeline, with one routing region to re-fetch
+    missing_q = (
+        db.query(Match.match_id, Player.region)
+        .join(ParticipantStats, ParticipantStats.match_id == Match.match_id)
+        .join(Player, Player.id == ParticipantStats.player_id)
+        .filter(Match.match_id.notin_(db.query(has_timeline_subq.c.match_id)))
+        .order_by(Match.game_creation.desc())
+        .distinct(Match.match_id)
+    )
+
+    if puuid:
+        missing_q = missing_q.filter(Player.puuid == puuid)
+
+    records = missing_q.limit(limit).all()
+
+    if not records:
+        return {
+            "status": "success",
+            "message": "No matches missing timeline data",
+            "processed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "failed_matches": [],
+        }
+
+    client = RiotClient()
+    processed = 0
+    skipped = 0
+    failed = 0
+    failed_matches = []
+
+    for match_id, routing in records:
+        try:
+            timeline_json = await client.get_match_timeline(match_id, routing)
+            insert_timeline(db, match_id, timeline_json)
+            db.commit()
+            processed += 1
+        except Exception as exc:
+            db.rollback()
+            failed += 1
+            failed_matches.append(f"{match_id}: {exc}")
+
+    return {
+        "status": "success" if failed == 0 else "partial",
+        "message": f"Backfilled timeline for {processed} matches",
+        "processed": processed,
+        "skipped": skipped,
+        "failed": failed,
+        "failed_matches": failed_matches[:10],
+    }
+
+
+@router.get("/timeline/status")
+def timeline_backfill_status(puuid: Optional[str] = None, db: Session = Depends(get_db)):
+    """
+    Coverage report for match_timelines.
+    Shows how many ingested matches have timeline data.
+    Optionally scope to a single player by passing `puuid`.
+    """
+    total_q = db.query(Match.match_id)
+    if puuid:
+        total_q = (
+            total_q
+            .join(ParticipantStats, ParticipantStats.match_id == Match.match_id)
+            .join(Player, Player.id == ParticipantStats.player_id)
+            .filter(Player.puuid == puuid)
+        )
+    total_matches = total_q.distinct().count()
+
+    with_timeline_q = db.query(MatchTimeline.match_id)
+    if puuid:
+        with_timeline_q = (
+            with_timeline_q
+            .join(Match, Match.match_id == MatchTimeline.match_id)
+            .join(ParticipantStats, ParticipantStats.match_id == Match.match_id)
+            .join(Player, Player.id == ParticipantStats.player_id)
+            .filter(Player.puuid == puuid)
+        )
+    with_timeline = with_timeline_q.distinct().count()
+
+    missing = total_matches - with_timeline
+    coverage = (with_timeline / total_matches * 100) if total_matches > 0 else 0.0
+
+    return {
+        "total_matches": total_matches,
+        "with_timeline": with_timeline,
+        "missing_timeline": missing,
         "coverage_percentage": round(coverage, 2),
     }

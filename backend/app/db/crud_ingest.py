@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import exists
 import logging
 
 from app.models.player import Player
@@ -146,21 +147,26 @@ def insert_participant_perks(session: Session, match_id: str, player_id: int, pa
             if len(selections) > 1:
                 sub_slot2 = selections[1].get("perk")
 
-    session.add(ParticipantPerks(
-        match_id=match_id,
-        player_id=player_id,
-        primary_style=primary_style,
-        keystone=keystone,
-        primary_slot1=primary_slot1,
-        primary_slot2=primary_slot2,
-        primary_slot3=primary_slot3,
-        sub_style=sub_style,
-        sub_slot1=sub_slot1,
-        sub_slot2=sub_slot2,
-        stat_offense=stat_perks.get("offense"),
-        stat_flex=stat_perks.get("flex"),
-        stat_defense=stat_perks.get("defense"),
-    ))
+    stmt = (
+        insert(ParticipantPerks)
+        .values(
+            match_id=match_id,
+            player_id=player_id,
+            primary_style=primary_style,
+            keystone=keystone,
+            primary_slot1=primary_slot1,
+            primary_slot2=primary_slot2,
+            primary_slot3=primary_slot3,
+            sub_style=sub_style,
+            sub_slot1=sub_slot1,
+            sub_slot2=sub_slot2,
+            stat_offense=stat_perks.get("offense"),
+            stat_flex=stat_perks.get("flex"),
+            stat_defense=stat_perks.get("defense"),
+        )
+        .on_conflict_do_nothing(index_elements=["match_id", "player_id"])
+    )
+    session.execute(stmt)
 
 
 def upsert_player(session: Session, puuid: str, riot_id: str, tag_line: str, routing: str) -> Player:
@@ -180,7 +186,30 @@ def upsert_player(session: Session, puuid: str, riot_id: str, tag_line: str, rou
 
 
 def match_exists(session: Session, match_id: str) -> bool:
-    return session.query(Match).filter(Match.match_id == match_id).first() is not None
+    return session.query(
+        exists().where(Match.match_id == match_id)
+    ).scalar()
+
+
+def _upsert_player_stub(
+    session: Session, puuid: str, game_name: str, tag_line: str, routing: str
+) -> Player:
+    """Get or create a Player row identified by PUUID.
+    Does NOT overwrite an existing player's riot_id / tag_line / region —
+    so a previously-tracked player's canonical data is always preserved.
+    """
+    player = session.query(Player).filter(Player.puuid == puuid).one_or_none()
+    if player:
+        return player
+    player = Player(
+        puuid=puuid,
+        riot_id=game_name or puuid[:16],
+        tag_line=tag_line or "",
+        region=routing,
+    )
+    session.add(player)
+    session.flush()
+    return player
 
 
 def insert_match_bundle_for_player(
@@ -188,13 +217,17 @@ def insert_match_bundle_for_player(
     match_json: dict,
     tracked_puuid: str,
     player_id: int,
+    routing: str = "",
 ) -> None:
     """
-    Insert a full match bundle for all 6 core tables:
-    matches, participant_stats, team_objectives, team_bans, derived_metrics.
+    Insert a full match bundle:
+    matches, participant_stats (all 10 participants), team_objectives,
+    team_bans, derived_metrics.
 
     Populates all extended fields from the YAML schema including items,
     damage type breakdown, multi-kills, first objectives, etc.
+    Non-tracked participants are automatically upserted as stub Player rows
+    using the riotIdGameName / riotIdTagline values from the match JSON.
     """
     info = match_json["info"]
     metadata = match_json["metadata"]
@@ -218,7 +251,7 @@ def insert_match_bundle_for_player(
     session.add(m)
     session.flush()
 
-    # Find the tracked participant
+    # Find the tracked participant — used later for derived metrics and perks.
     all_participants = info.get("participants", [])
     participant = next(
         (p for p in all_participants if p.get("puuid") == tracked_puuid), None
@@ -227,70 +260,88 @@ def insert_match_bundle_for_player(
         raise RuntimeError(f"Tracked participant not found in match {match_id}")
 
     team_id = participant.get("teamId", 0)
-    total_minions = participant.get("totalMinionsKilled") or 0
-    neutral_minions = participant.get("neutralMinionsKilled") or 0
-    cs = int(total_minions + neutral_minions)
 
-    ps = ParticipantStats(
-        match_id=match_id,
-        player_id=player_id,
-        team_id=team_id,
-        # Champion identity
-        champion=participant.get("championName"),
-        champion_id=participant.get("championId"),
-        champ_level=participant.get("champLevel"),
-        role=(
-            participant.get("teamPosition")
-            or participant.get("individualPosition")
-            or participant.get("role")
-        ),
-        # Core KDA
-        kills=participant.get("kills", 0),
-        deaths=participant.get("deaths", 0),
-        assists=participant.get("assists", 0),
-        double_kills=participant.get("doubleKills"),
-        triple_kills=participant.get("tripleKills"),
-        quadra_kills=participant.get("quadraKills"),
-        penta_kills=participant.get("pentaKills"),
-        # Economy
-        gold_earned=participant.get("goldEarned", 0),
-        gold_spent=participant.get("goldSpent"),
-        # CS
-        cs=cs,
-        total_minions_killed=total_minions,
-        neutral_minions_killed=neutral_minions,
-        # Damage
-        total_damage=participant.get("totalDamageDealtToChampions", 0),
-        physical_damage_to_champions=participant.get("physicalDamageDealtToChampions"),
-        magic_damage_to_champions=participant.get("magicDamageDealtToChampions"),
-        true_damage_to_champions=participant.get("trueDamageDealtToChampions"),
-        total_damage_taken=participant.get("totalDamageTaken"),
-        # Vision
-        vision_score=participant.get("visionScore", 0),
-        wards_placed=participant.get("wardsPlaced"),
-        wards_killed=participant.get("wardsKilled"),
-        detector_wards_placed=participant.get("detectorWardsPlaced"),
-        # CC
-        time_ccing_others=participant.get("timeCCingOthers"),
-        # First objectives
-        first_blood_kill=participant.get("firstBloodKill"),
-        first_blood_assist=participant.get("firstBloodAssist"),
-        first_tower_kill=participant.get("firstTowerKill"),
-        first_tower_assist=participant.get("firstTowerAssist"),
-        # Items
-        item0=participant.get("item0"),
-        item1=participant.get("item1"),
-        item2=participant.get("item2"),
-        item3=participant.get("item3"),
-        item4=participant.get("item4"),
-        item5=participant.get("item5"),
-        item6=participant.get("item6"),
-        # Summoner spells
-        summoner1_id=participant.get("summoner1Id"),
-        summoner2_id=participant.get("summoner2Id"),
-        win=participant.get("win"),
-    )
-    session.add(ps)
+    # Insert participant_stats for ALL 10 participants.
+    # Non-tracked players are auto-created as stub Player rows so that
+    # match detail endpoints can return a complete scoreboard.
+    for p in all_participants:
+        p_puuid = p.get("puuid") or ""
+        if p_puuid == tracked_puuid:
+            p_player_id = player_id
+        else:
+            stub = _upsert_player_stub(
+                session,
+                puuid=p_puuid,
+                game_name=p.get("riotIdGameName") or "",
+                tag_line=p.get("riotIdTagline") or "",
+                routing=routing,
+            )
+            p_player_id = stub.id
+
+        p_total_minions = p.get("totalMinionsKilled") or 0
+        p_neutral_minions = p.get("neutralMinionsKilled") or 0
+        p_cs = int(p_total_minions + p_neutral_minions)
+
+        session.add(ParticipantStats(
+            match_id=match_id,
+            player_id=p_player_id,
+            team_id=p.get("teamId", 0),
+            # Champion identity
+            champion=p.get("championName"),
+            champion_id=p.get("championId"),
+            champ_level=p.get("champLevel"),
+            role=(
+                p.get("teamPosition")
+                or p.get("individualPosition")
+                or p.get("role")
+            ),
+            # Core KDA
+            kills=p.get("kills", 0),
+            deaths=p.get("deaths", 0),
+            assists=p.get("assists", 0),
+            double_kills=p.get("doubleKills"),
+            triple_kills=p.get("tripleKills"),
+            quadra_kills=p.get("quadraKills"),
+            penta_kills=p.get("pentaKills"),
+            # Economy
+            gold_earned=p.get("goldEarned", 0),
+            gold_spent=p.get("goldSpent"),
+            # CS
+            cs=p_cs,
+            total_minions_killed=p_total_minions,
+            neutral_minions_killed=p_neutral_minions,
+            # Damage
+            total_damage=p.get("totalDamageDealtToChampions", 0),
+            physical_damage_to_champions=p.get("physicalDamageDealtToChampions"),
+            magic_damage_to_champions=p.get("magicDamageDealtToChampions"),
+            true_damage_to_champions=p.get("trueDamageDealtToChampions"),
+            total_damage_taken=p.get("totalDamageTaken"),
+            # Vision
+            vision_score=p.get("visionScore", 0),
+            wards_placed=p.get("wardsPlaced"),
+            wards_killed=p.get("wardsKilled"),
+            detector_wards_placed=p.get("detectorWardsPlaced"),
+            # CC
+            time_ccing_others=p.get("timeCCingOthers"),
+            # First objectives
+            first_blood_kill=p.get("firstBloodKill"),
+            first_blood_assist=p.get("firstBloodAssist"),
+            first_tower_kill=p.get("firstTowerKill"),
+            first_tower_assist=p.get("firstTowerAssist"),
+            # Items
+            item0=p.get("item0"),
+            item1=p.get("item1"),
+            item2=p.get("item2"),
+            item3=p.get("item3"),
+            item4=p.get("item4"),
+            item5=p.get("item5"),
+            item6=p.get("item6"),
+            # Summoner spells
+            summoner1_id=p.get("summoner1Id"),
+            summoner2_id=p.get("summoner2Id"),
+            win=p.get("win"),
+        ))
+        insert_participant_perks(session, match_id, p_player_id, p)
 
     # Team objectives + team bans (2 teams)
     for t in info.get("teams", []):
@@ -357,11 +408,6 @@ def insert_match_bundle_for_player(
             f"insert_draft_actions skipped for {match_id}: {draft_err}. "
             "Check native_enum=False on the DraftActions model or run `npx prisma db push`."
         )
-    try:
-        with session.begin_nested():
-            insert_participant_perks(session, match_id, player_id, participant)
-    except Exception as perks_err:
-        logger.warning(f"insert_participant_perks skipped for {match_id}: {perks_err}")
 
 
 
@@ -372,7 +418,12 @@ def insert_timeline(session: Session, match_id: str, timeline_json: dict) -> Non
     """
     Store timeline data: raw JSON + parsed participant frames.
     Called optionally after insert_match_bundle_for_player.
+    Idempotent: silently returns if a MatchTimeline row already exists for match_id.
     """
+    if session.query(MatchTimeline.match_id).filter_by(match_id=match_id).first():
+        logger.debug("insert_timeline: skipping %s — already stored", match_id)
+        return
+
     info = timeline_json.get("info", {})
 
     tl = MatchTimeline(

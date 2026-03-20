@@ -11,16 +11,19 @@ from app.models.derived_metrics import DerivedMetrics
 from app.models.player import Player
 from app.models.draft_actions import DraftActions, ActionType
 from app.models.participant_perks import ParticipantPerks
+from app.services.ddragon import get_champion_map
 
 router = APIRouter(prefix="/matches", tags=["matches"])
 
 
 @router.get("/player/{puuid}")
-def get_player_matches(puuid: str, limit: int = 20, db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+async def get_player_matches(puuid: str, limit: int = 20, db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
     """Match history for a player, ordered by most recent. Includes per-match stats."""
     player = db.query(Player).filter(Player.puuid == puuid).first()
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
+
+    champion_map = await get_champion_map()
 
     rows = (
         db.query(Match, ParticipantStats, DerivedMetrics)
@@ -48,6 +51,7 @@ def get_player_matches(puuid: str, limit: int = 20, db: Session = Depends(get_db
             # Participant stats
             "champion": ps.champion,
             "champion_id": ps.champion_id,
+            "champion_name": champion_map.get(ps.champion_id) if ps.champion_id else None,
             "champ_level": ps.champ_level,
             "role": ps.role,
             "kills": ps.kills,
@@ -75,7 +79,7 @@ def get_player_matches(puuid: str, limit: int = 20, db: Session = Depends(get_db
 
 
 @router.get("/{match_id}")
-def get_match_detail(match_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_match_detail(match_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Full match detail: metadata, both teams' objectives + bans,
     and all participant stats stored in the database.
@@ -83,6 +87,8 @@ def get_match_detail(match_id: str, db: Session = Depends(get_db)) -> Dict[str, 
     match = db.query(Match).filter(Match.match_id == match_id).first()
     if not match:
         raise HTTPException(status_code=404, detail="Match not found")
+
+    champion_map = await get_champion_map()
 
     objectives = (
         db.query(TeamObjectives)
@@ -126,7 +132,12 @@ def get_match_detail(match_id: str, db: Session = Depends(get_db)) -> Dict[str, 
         "end_of_game_result": match.end_of_game_result,
         "teams": [_team_obj(t) for t in objectives],
         "bans": [
-            {"team_id": b.team_id, "champion_id": b.champion_id, "pick_turn": b.pick_turn}
+            {
+                "team_id": b.team_id,
+                "champion_id": b.champion_id,
+                "champion_name": champion_map.get(b.champion_id) if b.champion_id else None,
+                "pick_turn": b.pick_turn,
+            }
             for b in sorted(bans, key=lambda x: (x.team_id, x.pick_turn))
         ],
         "participants": [
@@ -137,6 +148,7 @@ def get_match_detail(match_id: str, db: Session = Depends(get_db)) -> Dict[str, 
                 "team_id": ps.team_id,
                 "champion": ps.champion,
                 "champion_id": ps.champion_id,
+                "champion_name": champion_map.get(ps.champion_id) if ps.champion_id else None,
                 "champ_level": ps.champ_level,
                 "role": ps.role,
                 "kills": ps.kills, "deaths": ps.deaths, "assists": ps.assists,

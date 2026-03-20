@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List
+from typing import List, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -77,3 +77,23 @@ class IngestPlayerResponse(BaseModel):
     inserted: int
     skipped: int
     failed: List[str]
+
+
+class BatchIngestPlayerResult(BaseModel):
+    """Result for a single player in a batch ingestion request."""
+    gameName: str
+    tagLine: str
+    platform: str
+    status: str          # "success" | "partial" | "error"
+    puuid: Optional[str] = None
+    inserted: int = 0
+    skipped: int = 0
+    failed: List[str] = []
+    error: Optional[str] = None
+
+
+class BatchIngestResponse(BaseModel):
+    total: int
+    succeeded: int
+    errored: int
+    results: List[BatchIngestPlayerResult]

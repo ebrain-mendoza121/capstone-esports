@@ -10,7 +10,8 @@ from app.models.player import Player
 from app.models.match import Match
 from app.models.participant_stats import ParticipantStats
 from app.models.team_bans import TeamBans
-from app.services.ddragon import get_champion_map
+from app.models.participant_perks import ParticipantPerks
+from app.services.ddragon import get_champion_map, get_rune_map
 
 logger = logging.getLogger(__name__)
 
@@ -160,3 +161,76 @@ async def get_most_banned_champions(
         }
         for champ_id, count in most_banned
     ]
+
+
+@router.get("/runes/map")
+async def get_rune_name_map() -> Dict[int, str]:
+    """
+    Returns the full Data Dragon rune name map: {rune_id: rune_name}.
+    Covers both path IDs (e.g. 8000 → "Precision") and individual perk IDs
+    (e.g. 8005 → "Press the Attack").  Cached after the first request.
+    """
+    return await get_rune_map()
+
+
+@router.get("/player/{puuid}/runes")
+async def get_player_runes(
+    puuid: str,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Rune summary for a player's recent matches.
+    Returns each match's keystone, primary path, and secondary path — all
+    resolved to human-readable names via Data Dragon.
+    """
+    player = db.query(Player).filter(Player.puuid == puuid).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    rows = (
+        db.query(ParticipantPerks, Match.game_creation, ParticipantStats.champion)
+        .join(Match, Match.match_id == ParticipantPerks.match_id)
+        .join(
+            ParticipantStats,
+            (ParticipantStats.match_id == ParticipantPerks.match_id)
+            & (ParticipantStats.player_id == ParticipantPerks.player_id),
+        )
+        .filter(ParticipantPerks.player_id == player.id)
+        .order_by(Match.game_creation.desc())
+        .limit(limit)
+        .all()
+    )
+
+    if not rows:
+        return {"puuid": puuid, "matches_analyzed": 0, "runes": []}
+
+    rune_map = await get_rune_map()
+
+    return {
+        "puuid": puuid,
+        "matches_analyzed": len(rows),
+        "runes": [
+            {
+                "match_id": pk.match_id,
+                "champion": champion,
+                "primary_style_id": pk.primary_style,
+                "primary_style_name": rune_map.get(pk.primary_style) if pk.primary_style else None,
+                "keystone_id": pk.keystone,
+                "keystone_name": rune_map.get(pk.keystone) if pk.keystone else None,
+                "primary_slot1_id": pk.primary_slot1,
+                "primary_slot1_name": rune_map.get(pk.primary_slot1) if pk.primary_slot1 else None,
+                "primary_slot2_id": pk.primary_slot2,
+                "primary_slot2_name": rune_map.get(pk.primary_slot2) if pk.primary_slot2 else None,
+                "primary_slot3_id": pk.primary_slot3,
+                "primary_slot3_name": rune_map.get(pk.primary_slot3) if pk.primary_slot3 else None,
+                "sub_style_id": pk.sub_style,
+                "sub_style_name": rune_map.get(pk.sub_style) if pk.sub_style else None,
+                "sub_slot1_id": pk.sub_slot1,
+                "sub_slot1_name": rune_map.get(pk.sub_slot1) if pk.sub_slot1 else None,
+                "sub_slot2_id": pk.sub_slot2,
+                "sub_slot2_name": rune_map.get(pk.sub_slot2) if pk.sub_slot2 else None,
+            }
+            for pk, _game_creation, champion in rows
+        ],
+    }
