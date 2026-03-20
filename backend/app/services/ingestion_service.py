@@ -4,7 +4,12 @@ import logging
 
 from app.schemas.ingest import PLATFORM_TO_ROUTING, Platform
 from app.services.riot_client import RiotClient
-from app.db.crud_ingest import upsert_player, match_exists, insert_match_bundle_for_player, insert_timeline
+from app.db.crud_ingest import (
+    upsert_player,
+    match_exists,
+    insert_match_bundle_for_player,
+    insert_timeline,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +67,7 @@ async def ingest_player(
                     match_json=match_json,
                     tracked_puuid=puuid,
                     player_id=player.id,
+                    routing=routing,
                 )
                 if fetch_timeline:
                     try:
