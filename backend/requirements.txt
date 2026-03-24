@@ -5,3 +5,11 @@ psycopg[binary]==3.2.10
 pydantic-settings==2.10.1
 python-dotenv==1.1.1
 httpx==0.28.1
+# ML dependencies — exact pins required.
+# Any change here MUST be followed by a full retrain of all models.
+# See docs/retraining-checklist.md for the retrain procedure.
+pandas==3.0.1
+numpy==2.4.3
+scikit-learn==1.8.0
+xgboost==3.2.0
+joblib==1.5.3

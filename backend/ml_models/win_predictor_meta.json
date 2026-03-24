@@ -1,0 +1,73 @@
+{
+  "model_type": "logistic",
+  "trained_at": "2026-03-24T18:24:11.010009+00:00",
+  "n_samples": 1170,
+  "n_train": 936,
+  "n_test": 234,
+  "sklearn_version": "1.8.0",
+  "xgboost_version": "3.2.0",
+  "feature_cols": [
+    "win_rate_20",
+    "avg_kda_20",
+    "avg_cs_per_min_20",
+    "avg_gold_per_min_20",
+    "avg_kill_part_20",
+    "win_streak",
+    "death_rate_20",
+    "vision_per_min_20",
+    "kda_std_10",
+    "cs_trend_10",
+    "team_avg_win_rate_20",
+    "team_avg_kda_20",
+    "team_avg_cs_min_20",
+    "team_gold_diff_prior",
+    "patch_version_float",
+    "role_encoded"
+  ],
+  "train_medians": {
+    "win_rate_20": 0.5714285714285714,
+    "avg_kda_20": 3.9928636363636363,
+    "avg_cs_per_min_20": 7.621088235294118,
+    "avg_gold_per_min_20": 454.25149999999996,
+    "avg_kill_part_20": 0.5089609523809524,
+    "win_streak": 1.0,
+    "death_rate_20": 4.818181818181818,
+    "vision_per_min_20": 1.073235294117647,
+    "kda_std_10": 3.2597754409732227,
+    "cs_trend_10": -0.0027532467532467367,
+    "team_avg_win_rate_20": 0.5714285714285714,
+    "team_avg_kda_20": 3.9928636363636363,
+    "team_avg_cs_min_20": 7.621088235294118,
+    "team_gold_diff_prior": -320.141,
+    "patch_version_float": 16.05,
+    "role_encoded": 2.0
+  },
+  "metrics": {
+    "accuracy": 0.5598,
+    "roc_auc": 0.5318,
+    "lr_auc": 0.5318,
+    "xgb_auc": 0.4776
+  },
+  "top_factors": [
+    {
+      "feature": "avg_gold_per_min_20",
+      "importance": 0.304
+    },
+    {
+      "feature": "vision_per_min_20",
+      "importance": 0.1964
+    },
+    {
+      "feature": "patch_version_float",
+      "importance": 0.1861
+    },
+    {
+      "feature": "avg_kda_20",
+      "importance": 0.1741
+    },
+    {
+      "feature": "team_avg_kda_20",
+      "importance": 0.1741
+    }
+  ]
+}
