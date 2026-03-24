@@ -36,9 +36,11 @@ from app.db.session import Base, get_db                          # noqa: E402
 # ------------------------------------------------------------------
 from sqlalchemy.ext.compiler import compiles                     # noqa: E402
 
+
 @compiles(JSONB, "sqlite")
 def compile_jsonb_sqlite(element, compiler, **kw):
     return "TEXT"
+
 
 # ------------------------------------------------------------------
 # In-memory SQLite engine for integration tests.
