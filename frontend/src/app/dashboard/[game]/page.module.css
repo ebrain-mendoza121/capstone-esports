@@ -1,0 +1,542 @@
+.page {
+  --accent: #26d4b7;
+  --accent-alt: #ffb049;
+  --accent-muted: rgba(38, 212, 183, 0.16);
+  --positive-swing: #26d4b7;
+  position: relative;
+  min-height: 100vh;
+  padding: clamp(12px, 3vw, 26px);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 12% 8%, rgba(38, 212, 183, 0.16), transparent 35%),
+    radial-gradient(circle at 94% 2%, rgba(255, 176, 73, 0.16), transparent 33%),
+    linear-gradient(140deg, #070b1d 0%, #0f1735 56%, #0a112a 100%);
+}
+
+.league {
+  --accent: #26d4b7;
+  --accent-alt: #ffb049;
+  --accent-muted: rgba(38, 212, 183, 0.16);
+}
+
+.valorant {
+  --accent: #ff5f6f;
+  --accent-alt: #ffd166;
+  --accent-muted: rgba(255, 95, 111, 0.15);
+}
+
+.overlayOne,
+.overlayTwo {
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.overlayOne {
+  top: -140px;
+  left: -120px;
+  width: 460px;
+  height: 460px;
+  background: radial-gradient(circle, var(--accent-muted), transparent 70%);
+}
+
+.overlayTwo {
+  right: -120px;
+  bottom: -180px;
+  width: 460px;
+  height: 460px;
+  background: radial-gradient(circle, rgba(255, 176, 73, 0.16), transparent 70%);
+}
+
+.shell {
+  position: relative;
+  max-width: 1280px;
+  margin: 0 auto;
+  display: grid;
+  gap: 14px;
+}
+
+.header {
+  border: 1px solid rgba(243, 244, 239, 0.18);
+  border-radius: var(--radius-m);
+  padding: clamp(16px, 2.6vw, 24px);
+  background:
+    linear-gradient(145deg, rgba(18, 26, 51, 0.82), rgba(12, 18, 40, 0.62)),
+    radial-gradient(circle at 90% 18%, rgba(255, 255, 255, 0.08), transparent 44%);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  box-shadow: var(--shadow-soft);
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.7rem;
+  color: rgba(243, 244, 239, 0.7);
+}
+
+.title {
+  margin-top: 6px;
+  margin-bottom: 8px;
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 3.5vw, 2.7rem);
+  line-height: 0.98;
+  color: #fffdf6;
+}
+
+.subtitle {
+  color: rgba(243, 244, 239, 0.82);
+  max-width: 62ch;
+}
+
+.subtitle strong {
+  color: #fff;
+  font-weight: 700;
+}
+
+.landingLink {
+  border-radius: 999px;
+  border: 1px solid rgba(243, 244, 239, 0.28);
+  padding: 10px 16px;
+  color: #f8f9ff;
+  font-weight: 600;
+  background: rgba(243, 244, 239, 0.06);
+  transition: border-color var(--ease-main), transform var(--ease-main), background var(--ease-main);
+}
+
+.landingLink:hover {
+  transform: translateY(-1px);
+  border-color: rgba(243, 244, 239, 0.48);
+  background: rgba(243, 244, 239, 0.1);
+}
+
+.filters {
+  border: 1px solid rgba(243, 244, 239, 0.16);
+  border-radius: var(--radius-m);
+  padding: 12px;
+  background: rgba(11, 17, 39, 0.72);
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.filterField,
+.tableFilter {
+  display: grid;
+  gap: 6px;
+  font-size: 0.77rem;
+  color: rgba(243, 244, 239, 0.77);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.filterField input,
+.filterField select,
+.tableFilter select {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid rgba(243, 244, 239, 0.24);
+  background: rgba(9, 14, 32, 0.86);
+  color: #f9f9ff;
+  padding: 10px;
+}
+
+.filterField input:focus,
+.filterField select:focus,
+.tableFilter select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 76%);
+}
+
+.applyButton {
+  border: none;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: linear-gradient(124deg, var(--accent) 0%, var(--accent-alt) 95%);
+  color: #0d1228;
+  font-weight: 700;
+  cursor: pointer;
+  align-self: end;
+  transition: transform var(--ease-main), filter var(--ease-main);
+}
+
+.applyButton:hover {
+  transform: translateY(-1px);
+  filter: saturate(1.04);
+}
+
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.kpiCard {
+  border-radius: 12px;
+  padding: 12px;
+  background:
+    linear-gradient(160deg, rgba(20, 31, 66, 0.9), rgba(11, 19, 42, 0.9)),
+    radial-gradient(circle at 90% 10%, color-mix(in srgb, var(--accent), transparent 72%), transparent 48%);
+  border: 1px solid rgba(243, 244, 239, 0.15);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  animation: fadeUp 420ms ease forwards;
+  opacity: 0;
+}
+
+.kpiCard p {
+  color: rgba(243, 244, 239, 0.68);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.kpiCard strong {
+  display: block;
+  margin: 8px 0;
+  color: #ffffff;
+  font-size: 1.3rem;
+  letter-spacing: 0.01em;
+}
+
+.trendUp,
+.trendDown {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.trendUp {
+  color: var(--accent);
+}
+
+.trendDown {
+  color: #ff8ea0;
+}
+
+.analyticsGrid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.card {
+  grid-column: span 3;
+  border: 1px solid rgba(243, 244, 239, 0.16);
+  border-radius: var(--radius-m);
+  padding: 12px;
+  background:
+    linear-gradient(155deg, rgba(17, 25, 53, 0.86), rgba(10, 16, 38, 0.72)),
+    radial-gradient(circle at 82% 10%, color-mix(in srgb, var(--accent), transparent 75%), transparent 46%);
+}
+
+.card:nth-child(3),
+.card:nth-child(4),
+.card:nth-child(5),
+.card:nth-child(6) {
+  grid-column: span 3;
+}
+
+.cardHeader h2 {
+  color: #f8f8ff;
+  font-size: 1.05rem;
+}
+
+.cardHeader p {
+  color: rgba(243, 244, 239, 0.7);
+  font-size: 0.84rem;
+  margin-top: 3px;
+  margin-bottom: 10px;
+}
+
+.chartSvg {
+  width: 100%;
+  height: 220px;
+}
+
+.gridLine {
+  stroke: rgba(243, 244, 239, 0.17);
+  stroke-width: 1;
+}
+
+.deltaBars {
+  display: grid;
+  gap: 8px;
+}
+
+.deltaRow {
+  display: grid;
+  grid-template-columns: 36px 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.deltaLabel {
+  font-size: 0.74rem;
+  color: rgba(243, 244, 239, 0.66);
+}
+
+.deltaTrack {
+  position: relative;
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 95, 111, 0.24) 0%,
+    rgba(255, 255, 255, 0.08) 50%,
+    color-mix(in srgb, var(--positive-swing), transparent 76%) 100%
+  );
+}
+
+.deltaPositive,
+.deltaNegative {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+}
+
+.deltaPositive {
+  left: 50%;
+  background: var(--positive-swing);
+}
+
+.deltaNegative {
+  background: #ff6d81;
+}
+
+.radarSvg {
+  width: 100%;
+  max-height: 260px;
+}
+
+.radarRing {
+  fill: color-mix(in srgb, var(--accent), transparent 92%);
+  stroke: color-mix(in srgb, var(--accent), transparent 72%);
+}
+
+.radarAxis {
+  stroke: rgba(243, 244, 239, 0.2);
+}
+
+.radarArea {
+  fill: color-mix(in srgb, var(--accent), transparent 64%);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+
+.radarText {
+  font-size: 10px;
+  fill: rgba(243, 244, 239, 0.85);
+}
+
+.characterList {
+  display: grid;
+  gap: 10px;
+}
+
+.characterRow {
+  display: grid;
+  gap: 7px;
+}
+
+.characterRow strong {
+  color: #fff;
+  font-size: 0.93rem;
+}
+
+.characterRow p {
+  color: rgba(243, 244, 239, 0.7);
+  font-size: 0.8rem;
+}
+
+.performanceTrack {
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(243, 244, 239, 0.14);
+  overflow: hidden;
+}
+
+.performanceTrack span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-alt));
+}
+
+.insightsList {
+  display: grid;
+  gap: 8px;
+  color: rgba(243, 244, 239, 0.88);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  padding-left: 17px;
+}
+
+.tableCard {
+  border: 1px solid rgba(243, 244, 239, 0.16);
+  border-radius: var(--radius-m);
+  background: rgba(11, 17, 39, 0.8);
+  padding: 12px;
+}
+
+.tableHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.tableHeader h2 {
+  color: #fffdf7;
+  font-size: 1.1rem;
+}
+
+.tableHeader p {
+  margin-top: 3px;
+  color: rgba(243, 244, 239, 0.72);
+}
+
+.tableFilter {
+  width: 170px;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border-radius: 10px;
+  border: 1px solid rgba(243, 244, 239, 0.14);
+}
+
+.tableWrap table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 660px;
+}
+
+.tableWrap th,
+.tableWrap td {
+  padding: 11px 10px;
+  border-bottom: 1px solid rgba(243, 244, 239, 0.12);
+  text-align: left;
+  color: rgba(243, 244, 239, 0.88);
+  font-size: 0.84rem;
+}
+
+.tableWrap th {
+  background: rgba(243, 244, 239, 0.05);
+}
+
+.tableWrap th button {
+  border: none;
+  background: none;
+  color: rgba(243, 244, 239, 0.8);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.winTag,
+.lossTag {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-weight: 700;
+  font-size: 0.74rem;
+}
+
+.winTag {
+  background: color-mix(in srgb, var(--accent), transparent 72%);
+  color: #ffffff;
+}
+
+.lossTag {
+  background: rgba(255, 95, 111, 0.23);
+  color: #ffdce1;
+}
+
+.invalidPage {
+  min-height: 100vh;
+  display: grid;
+  place-content: center;
+  gap: 8px;
+  text-align: center;
+  padding: 24px;
+  background: #070b1d;
+  color: #fff;
+}
+
+.invalidPage a {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 1220px) {
+  .kpiGrid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .applyButton {
+    min-height: 42px;
+  }
+}
+
+@media (max-width: 920px) {
+  .header {
+    flex-direction: column;
+  }
+
+  .filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .analyticsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .card,
+  .card:nth-child(3),
+  .card:nth-child(4),
+  .card:nth-child(5),
+  .card:nth-child(6) {
+    grid-column: auto;
+  }
+
+  .tableHeader {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .tableFilter {
+    width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 10px;
+  }
+
+  .filters {
+    grid-template-columns: 1fr;
+  }
+
+  .kpiGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
