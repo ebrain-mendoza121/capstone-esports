@@ -1,104 +1,211 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import styles from "./page.module.css";
+import styles from "@/app/mvp.module.css";
+import {
+  QueueCode,
+  IngestPlayerInput,
+  MockApiError,
+  PlayerSummary,
+  frontendMvpClient,
+} from "@/lib/frontendMvpClient";
 
-type GameSlug = "league-of-legends" | "valorant";
+const defaultForm: IngestPlayerInput = {
+  gameName: "",
+  tagLine: "",
+  platform: "NA1",
+  matchCount: 20,
+  queue: 420,
+};
 
-const GAME_OPTIONS: Array<{ value: GameSlug; label: string; tag: string }> = [
-  { value: "league-of-legends", label: "League of Legends", tag: "Macro + Objective" },
-  { value: "valorant", label: "Valorant", tag: "Entry + Utility" },
-];
-
-export default function Home() {
+export default function PlayerSearchPage() {
   const router = useRouter();
-  const [riotId, setRiotId] = useState("18178178");
-  const [selectedGame, setSelectedGame] = useState<GameSlug>("league-of-legends");
+  const [form, setForm] = useState<IngestPlayerInput>(defaultForm);
+  const [players, setPlayers] = useState<PlayerSummary[]>([]);
+  const [loadingPlayers, setLoadingPlayers] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    let mounted = true;
+
+    const loadPlayers = async () => {
+      try {
+        const response = await frontendMvpClient.listPlayers();
+        if (mounted) {
+          setPlayers(response);
+        }
+      } finally {
+        if (mounted) {
+          setLoadingPlayers(false);
+        }
+      }
+    };
+
+    void loadPlayers();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setSubmitting(true);
+    setErrorMessage(null);
 
-    const cleanRiotId = riotId.trim();
-    if (!cleanRiotId) {
-      return;
+    try {
+      const player = await frontendMvpClient.ingestPlayer(form);
+      router.push(`/player/${player.puuid}`);
+    } catch (error) {
+      if (error instanceof MockApiError) {
+        setErrorMessage(error.message);
+      } else {
+        setErrorMessage("Unexpected ingest error. Please try again.");
+      }
+    } finally {
+      setSubmitting(false);
     }
-
-    const params = new URLSearchParams({ riotId: cleanRiotId });
-    router.push(`/dashboard/${selectedGame}?${params.toString()}`);
   };
 
   return (
     <main className={styles.page}>
-      <div className={styles.backdrop} aria-hidden="true" />
-      <div className={styles.gridMask} aria-hidden="true" />
-
-      <section className={styles.shell}>
-        <aside className={styles.leadPanel}>
-          <p className={styles.kicker}>Capstone Esports Lab</p>
-          <h1 className={styles.title}>Competitive Form Intelligence</h1>
-          <p className={styles.summary}>
-            Launch a game-specific control board with KPI telemetry, role-impact radar, performance
-            trends, and match-by-match diagnostics.
+      <div className={styles.container}>
+        <header className={styles.hero}>
+          <p className={styles.eyebrow}>Frontend MVP · Page 1</p>
+          <h1 className={styles.title}>League of Legends Player Search</h1>
+          <p className={styles.subtitle}>
+            League of Legends entry point for the flow. Ingest by Riot ID + tag, or jump into an existing player to
+            generate the `puuid` required by all downstream screens.
           </p>
+        </header>
 
-          <ul className={styles.signalRail}>
-            <li>
-              <span>Realtime Sim</span>
-              <strong>Adaptive trend modeling</strong>
-            </li>
-            <li>
-              <span>Player Scope</span>
-              <strong>Riot ID specific profile</strong>
-            </li>
-            <li>
-              <span>Coaching Feed</span>
-              <strong>Automated tactical insights</strong>
-            </li>
-          </ul>
-        </aside>
+        {errorMessage ? <div className={styles.error}>{errorMessage}</div> : null}
 
-        <section className={styles.formPanel}>
-          <div className={styles.formTop}>
-            <p className={styles.formEyebrow}>Session Setup</p>
-            <p className={styles.formCopy}>Choose your title and deploy the analytics dashboard.</p>
+        <section className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <div>
+              <h2 className={styles.sectionTitle}>Ingest Form</h2>
+              <p className={styles.sectionCopy}>Create or refresh a player profile in the mock dataset.</p>
+            </div>
           </div>
 
-          <form className={styles.form} onSubmit={handleSubmit}>
-            <label className={styles.field} htmlFor="riot-id">
-              Riot Games ID
+          <form className={styles.formGrid} onSubmit={handleSubmit}>
+            <label className={styles.field}>
+              Game Name
               <input
-                id="riot-id"
                 className={styles.input}
-                placeholder="e.g. 18178178"
-                value={riotId}
-                onChange={(event) => setRiotId(event.target.value)}
+                value={form.gameName}
+                onChange={(event) => setForm({ ...form, gameName: event.target.value })}
+                placeholder="e.g. Faker"
                 required
               />
             </label>
 
-            <label className={styles.field} htmlFor="game-select">
-              Game
+            <label className={styles.field}>
+              Tag Line
+              <input
+                className={styles.input}
+                value={form.tagLine}
+                onChange={(event) => setForm({ ...form, tagLine: event.target.value })}
+                placeholder="e.g. KR1"
+                required
+              />
+            </label>
+
+            <label className={styles.field}>
+              Platform
               <select
-                id="game-select"
                 className={styles.select}
-                value={selectedGame}
-                onChange={(event) => setSelectedGame(event.target.value as GameSlug)}
+                value={form.platform}
+                onChange={(event) => setForm({ ...form, platform: event.target.value })}
               >
-                {GAME_OPTIONS.map((gameOption) => (
-                  <option key={gameOption.value} value={gameOption.value}>
-                    {gameOption.label} - {gameOption.tag}
-                  </option>
-                ))}
+                <option value="NA1">NA1</option>
+                <option value="EUW1">EUW1</option>
+                <option value="KR">KR</option>
+                <option value="LA1">LA1</option>
               </select>
             </label>
 
-            <button className={styles.button} type="submit">
-              Open Tactical Dashboard
+            <label className={styles.field}>
+              Match Count
+              <input
+                className={styles.input}
+                type="number"
+                min={1}
+                max={200}
+                value={form.matchCount}
+                onChange={(event) => setForm({ ...form, matchCount: Number(event.target.value) })}
+              />
+            </label>
+
+            <label className={styles.field}>
+              Queue
+              <select
+                className={styles.select}
+                value={form.queue}
+                onChange={(event) => setForm({ ...form, queue: Number(event.target.value) as QueueCode })}
+              >
+                <option value={420}>420 · Ranked Solo</option>
+                <option value={440}>440 · Ranked Flex</option>
+              </select>
+            </label>
+
+            <button className={styles.buttonPrimary} type="submit" disabled={submitting}>
+              {submitting ? "Ingesting..." : "Ingest & Open Dashboard"}
             </button>
           </form>
+
+          <p className={styles.small}>
+            Tip: Enter `404`, `503`, or `502` as Game Name to test error-state UI messages.
+          </p>
         </section>
-      </section>
+
+        <section className={styles.section}>
+          <div className={styles.sectionHeader}>
+            <div>
+              <h2 className={styles.sectionTitle}>Existing Players</h2>
+              <p className={styles.sectionCopy}>Previously ingested player profiles.</p>
+            </div>
+          </div>
+
+          {loadingPlayers ? (
+            <p className={styles.loading}>Loading player registry...</p>
+          ) : (
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>Riot ID</th>
+                    <th>Tag</th>
+                    <th>Region</th>
+                    <th>Open</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {players.map((player) => (
+                    <tr key={player.puuid}>
+                      <td>{player.riot_id}</td>
+                      <td>#{player.tag_line}</td>
+                      <td>{player.region}</td>
+                      <td>
+                        <button
+                          className={styles.buttonGhost}
+                          onClick={() => router.push(`/player/${player.puuid}`)}
+                          type="button"
+                        >
+                          Go to Dashboard
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      </div>
     </main>
   );
 }
