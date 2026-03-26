@@ -1,13 +1,24 @@
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --ink-950: #0b1024;
+  --ink-900: #121a33;
+  --ink-700: #24315f;
+  --mist-100: #f3f4ef;
+  --mist-200: #dde0d2;
+  --teal-500: #26d4b7;
+  --amber-500: #ffb049;
+  --ruby-500: #ff5f6f;
+  --line-soft: rgba(255, 255, 255, 0.18);
+  --line-strong: rgba(255, 255, 255, 0.34);
+  --panel-glass: rgba(9, 15, 34, 0.78);
+  --panel-surface: rgba(255, 255, 255, 0.93);
+  --shadow-deep: 0 30px 80px rgba(6, 8, 19, 0.48);
+  --shadow-soft: 0 14px 36px rgba(8, 13, 36, 0.26);
+  --radius-l: 24px;
+  --radius-m: 16px;
+  --radius-s: 12px;
+  --ease-main: 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  --font-display: "Bodoni Moda", "Didot", "Bodoni MT", "Times New Roman", serif;
+  --font-body: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
 }
 
 html,
@@ -17,11 +28,11 @@ body {
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-body);
+  color: #e8ebff;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  background: var(--ink-950);
 }
 
 * {
@@ -35,8 +46,9 @@ a {
   text-decoration: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  html {
-    color-scheme: dark;
-  }
+input,
+select,
+button,
+textarea {
+  font: inherit;
 }
