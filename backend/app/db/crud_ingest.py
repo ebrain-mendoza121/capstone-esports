@@ -430,7 +430,7 @@ def insert_timeline(session: Session, match_id: str, timeline_json: dict) -> Non
         match_id=match_id,
         frame_interval=info.get("frameInterval"),
         end_of_game_result=info.get("endOfGameResult"),
-        raw_timeline_json=info,
+        raw_timeline_json=None,  # raw blob not stored — parsed frames/events are sufficient
     )
     session.add(tl)
     session.flush()
@@ -456,12 +456,20 @@ def insert_timeline(session: Session, match_id: str, timeline_json: dict) -> Non
                 jungle_minions_killed=pf.get("jungleMinionsKilled"),
             ))
 
+        # Only store the 3 event types used by the early-game model,
+        # and only before 15 minutes. All other events are discarded
+        # to keep storage usage manageable.
+        _USEFUL_EVENTS = {"CHAMPION_KILL", "BUILDING_KILL", "ELITE_MONSTER_KILL"}
         for event in frame.get("events", []):
+            evt_type = event.get("type")
+            evt_ts = event.get("timestamp", 0)
+            if evt_type not in _USEFUL_EVENTS or evt_ts >= 900000:
+                continue
             session.add(TimelineEvent(
                 match_id=match_id,
-                timestamp=event.get("timestamp"),
+                timestamp=evt_ts,
                 real_timestamp=event.get("realTimestamp"),
-                event_type=event.get("type"),
+                event_type=evt_type,
                 raw_event_json=event,
             ))
 
