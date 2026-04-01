@@ -67,7 +67,8 @@ export interface TeamStats {
   towers: number;
   dragons: number;
   barons: number;
-  inhibs: number;
+  inhibitor_kills: number;
+  rift_herald_kills: number;
   win: boolean;
 }
 
@@ -81,19 +82,21 @@ export interface MatchParticipant {
   assists: number;
   cs: number;
   gold_earned: number;
-  damage: number;
+  total_damage: number;
   vision_score: number;
   items: number[];
-  keystone: string;
+  perks: {
+    keystone: string;
+  };
   team_id: 100 | 200;
   win: boolean;
 }
 
 export interface MatchDetail {
   match_id: string;
-  queue: QueueCode;
-  patch: string;
-  duration: number;
+  queue_id: QueueCode;
+  patch_version: string;
+  game_duration: number;
   date: string;
   teams: TeamStats[];
   participants: MatchParticipant[];
@@ -198,8 +201,8 @@ export interface FrontendMvpClient {
   getMatchesByPlayer(puuid: string, limit: number): Promise<MatchHistoryEntry[]>;
 
   // Page 4
-  getMatch(matchId: string): Promise<MatchDetail>;//TODO
-  getMatchDraft(matchId: string): Promise<DraftData>;//TODO
+  getMatch(matchId: string): Promise<MatchDetail>;
+  getMatchDraft(matchId: string): Promise<DraftData>;
 
   // Page 5
   getPlayerBanAnalytics(puuid: string, limit: number): Promise<PlayerBanAnalytics>;//TODO
@@ -389,10 +392,10 @@ function makeMatchParticipants(matchId: string): MatchParticipant[] {
       assists: randomInt(rng, 1, 24),
       cs: randomInt(rng, 90, 360),
       gold_earned: randomInt(rng, 7000, 20000),
-      damage: randomInt(rng, 8000, 58000),
+      total_damage: randomInt(rng, 8000, 58000),
       vision_score: randomInt(rng, 8, 88),
       items: Array.from({ length: 7 }, () => randomInt(rng, 1001, 7000)),
-      keystone: pick(rng, KEYSTONES),
+      perks:{keystone: pick(rng, KEYSTONES)},
       team_id: teamId,
       win: teamId === 100,
     };
@@ -487,46 +490,34 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getMatch(matchId) {
-    const rng = createRng(`${matchId}:match`);
-
-    return {
-      match_id: matchId,
-      queue: pick(rng, QUEUES),
-      patch: pick(rng, PATCHES),
-      duration: randomInt(rng, 1200, 2400),
-      date: formatDateFromOffset(randomInt(rng, 0, 20)),
-      teams: [
-        {
-          team_id: 100,
-          towers: randomInt(rng, 2, 11),
-          dragons: randomInt(rng, 0, 4),
-          barons: randomInt(rng, 0, 3),
-          inhibs: randomInt(rng, 0, 3),
-          win: true,
-        },
-        {
-          team_id: 200,
-          towers: randomInt(rng, 1, 8),
-          dragons: randomInt(rng, 0, 3),
-          barons: randomInt(rng, 0, 2),
-          inhibs: randomInt(rng, 0, 2),
-          win: false,
-        },
-      ],
-      participants: makeMatchParticipants(matchId),
-      has_timeline: hash(matchId) % 5 !== 0,
-    };
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/matches/${matchId}/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch match details from Riot API");
+    }
+    const match = await res.json();
+    return match;
   },
 
   async getMatchDraft(matchId) {
-    const rng = createRng(`${matchId}:draft`);
-
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/matches/${matchId}/draft/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch match draft data from Riot API");
+    }
+    const draft = await res.json();
     return {
-      team100_bans: Array.from({ length: 5 }, () => pick(rng, CHAMPIONS)),
-      team200_bans: Array.from({ length: 5 }, () => pick(rng, CHAMPIONS)),
-      team100_picks: Array.from({ length: 5 }, () => pick(rng, CHAMPIONS)),
-      team200_picks: Array.from({ length: 5 }, () => pick(rng, CHAMPIONS)),
-    };
+    team100_bans: (draft.draft["100"].bans).map(
+      (ban: { champion_id: number }) => ban.champion_id
+    ),
+    team200_bans: (draft.draft["200"].bans).map(
+      (ban: { champion_id: number }) => ban.champion_id
+    ),
+    team100_picks: (draft.draft["100"].picks).map(
+      (pick: { champion_id: number }) => pick.champion_id
+    ),
+    team200_picks: (draft.draft["200"].picks).map(
+      (pick: { champion_id: number }) => pick.champion_id
+    ),
+  }
   },
 
   async getPlayerBanAnalytics(puuid, limit) {

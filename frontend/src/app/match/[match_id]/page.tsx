@@ -97,9 +97,9 @@ export default function MatchDetailPage() {
             )}
           </div>
           <div className={styles.inlineList}>
-            <span className={styles.badgeNeutral}>Queue {detail.queue}</span>
-            <span className={styles.badgeNeutral}>Patch {detail.patch}</span>
-            <span className={styles.badgeNeutral}>Duration {formatDuration(detail.duration)}</span>
+            <span className={styles.badgeNeutral}>Queue {detail.queue_id}</span>
+            <span className={styles.badgeNeutral}>Patch {detail.patch_version}</span>
+            <span className={styles.badgeNeutral}>Duration {formatDuration(detail.game_duration)}</span>
             <span className={styles.badgeNeutral}>{new Date(detail.date).toLocaleString()}</span>
           </div>
         </section>
@@ -114,15 +114,15 @@ export default function MatchDetailPage() {
 
           <div className={styles.twoCol}>
             <article className={styles.dataCard}>
-              <h3>Team 100 Bans</h3>
+              <h3>Blue Team Bans</h3>
               <p className={styles.small}>{draft.team100_bans.join(" · ")}</p>
-              <h3 style={{ marginTop: "10px" }}>Team 100 Picks</h3>
+              <h3 style={{ marginTop: "10px" }}>Blue Team Picks</h3>
               <p className={styles.small}>{draft.team100_picks.join(" · ")}</p>
             </article>
             <article className={styles.dataCard}>
-              <h3>Team 200 Bans</h3>
+              <h3>Red Team Bans</h3>
               <p className={styles.small}>{draft.team200_bans.join(" · ")}</p>
-              <h3 style={{ marginTop: "10px" }}>Team 200 Picks</h3>
+              <h3 style={{ marginTop: "10px" }}>Red Team Picks</h3>
               <p className={styles.small}>{draft.team200_picks.join(" · ")}</p>
             </article>
           </div>
@@ -141,7 +141,7 @@ export default function MatchDetailPage() {
               <article className={styles.dataCard} key={team.team_id}>
                 <h3>Team {team.team_id}</h3>
                 <p className={styles.small}>
-                  Towers {team.towers} · Dragons {team.dragons} · Barons {team.barons} · Inhibs {team.inhibs}
+                  Towers {team.towers} · Dragons {team.dragons} · Barons {team.barons} · Rift Herald {team.rift_herald_kills} · Inhibs {team.inhibitor_kills}
                 </p>
                 <p style={{ marginTop: "8px" }}>
                   <span className={team.win ? styles.badgeWin : styles.badgeLoss}>
@@ -156,7 +156,7 @@ export default function MatchDetailPage() {
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <div>
-              <h2 className={styles.sectionTitle}>Scoreboard — Team 100 (Blue)</h2>
+              <h2 className={styles.sectionTitle}>Scoreboard — Blue Team</h2>
               <p className={styles.sectionCopy}>All five participants with item strip and keystone</p>
             </div>
           </div>
@@ -188,10 +188,10 @@ export default function MatchDetailPage() {
                     </td>
                     <td>{entry.cs}</td>
                     <td>{entry.gold_earned.toLocaleString()}</td>
-                    <td>{entry.damage.toLocaleString()}</td>
+                    <td>{entry.total_damage.toLocaleString()}</td>
                     <td>{entry.vision_score}</td>
                     <td>{entry.items.join(" · ")}</td>
-                    <td>{entry.keystone}</td>
+                    <td>{entry.perks.keystone}</td>
                     <td>
                       <span className={entry.win ? styles.badgeWin : styles.badgeLoss}>
                         {entry.win ? "Win" : "Loss"}
@@ -207,7 +207,7 @@ export default function MatchDetailPage() {
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <div>
-              <h2 className={styles.sectionTitle}>Scoreboard — Team 200 (Red)</h2>
+              <h2 className={styles.sectionTitle}>Scoreboard — Red Team</h2>
             </div>
           </div>
           <div className={styles.tableWrap}>
@@ -238,10 +238,10 @@ export default function MatchDetailPage() {
                     </td>
                     <td>{entry.cs}</td>
                     <td>{entry.gold_earned.toLocaleString()}</td>
-                    <td>{entry.damage.toLocaleString()}</td>
+                    <td>{entry.total_damage.toLocaleString()}</td>
                     <td>{entry.vision_score}</td>
                     <td>{entry.items.join(" · ")}</td>
-                    <td>{entry.keystone}</td>
+                    <td>{entry.perks.keystone}</td>
                     <td>
                       <span className={entry.win ? styles.badgeWin : styles.badgeLoss}>
                         {entry.win ? "Win" : "Loss"}
