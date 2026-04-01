@@ -473,7 +473,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getPlayer(puuid) {
-    const player = resolvePlayer(puuid);
+    const player = await resolvePlayer(puuid);
     return {
       ...player
     };
