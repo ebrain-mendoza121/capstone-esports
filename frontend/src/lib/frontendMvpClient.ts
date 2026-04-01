@@ -192,28 +192,28 @@ export interface FrontendMvpClient {
   // Page 2
   getPlayer(puuid: string): Promise<PlayerDetail>;
   getPlayerMetrics(puuid: string): Promise<PlayerMetrics>;
-  getPlayerRunes(puuid: string, limit: number): Promise<RuneEntry[]>;
+  getPlayerRunes(puuid: string, limit: number): Promise<RuneEntry[]>;//TODO
 
   // Page 3
-  getMatchesByPlayer(puuid: string, limit: number): Promise<MatchHistoryEntry[]>;
+  getMatchesByPlayer(puuid: string, limit: number): Promise<MatchHistoryEntry[]>;//TODO
 
   // Page 4
-  getMatch(matchId: string): Promise<MatchDetail>;
-  getMatchDraft(matchId: string): Promise<DraftData>;
+  getMatch(matchId: string): Promise<MatchDetail>;//TODO
+  getMatchDraft(matchId: string): Promise<DraftData>;//TODO
 
   // Page 5
-  getPlayerBanAnalytics(puuid: string, limit: number): Promise<PlayerBanAnalytics>;
-  getGlobalMostBanned(limit: number): Promise<GlobalBanEntry[]>;
-  getChampionBanRate(championId: number): Promise<ChampionBanRate>;
+  getPlayerBanAnalytics(puuid: string, limit: number): Promise<PlayerBanAnalytics>;//TODO
+  getGlobalMostBanned(limit: number): Promise<GlobalBanEntry[]>;//TODO
+  getChampionBanRate(championId: number): Promise<ChampionBanRate>;//TODO
 
   // Page 6
-  getRunesMap(): Promise<RuneMapEntry[]>;
-  getPlayerRuneHistory(puuid: string, limit: number): Promise<RuneEntry[]>;
+  getRunesMap(): Promise<RuneMapEntry[]>;//TODO
+  getPlayerRuneHistory(puuid: string, limit: number): Promise<RuneEntry[]>;//TODO
 
   // Page 7
-  getTimelineAvailability(matchId: string): Promise<TimelineAvailability>;
-  getTimelineFramesByPuuid(matchId: string, puuid: string): Promise<TimelineFrame[]>;
-  getTimelineEvents(matchId: string, limit: number, cursor?: string): Promise<TimelineEventsResponse>;
+  getTimelineAvailability(matchId: string): Promise<TimelineAvailability>;//TODO
+  getTimelineFramesByPuuid(matchId: string, puuid: string): Promise<TimelineFrame[]>;//TODO
+  getTimelineEvents(matchId: string, limit: number, cursor?: string): Promise<TimelineEventsResponse>;//TODO
 }
 
 const CHAMPIONS = [
@@ -300,6 +300,23 @@ function makePuuid(seedText: string): string {
   return `puuid_${hash(seedText).toString(36).slice(0, 10)}`;
 }
 
+async function getPuuidFromRiotId(riotId: string, tagLine: string){
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/players/`);
+  if (!res.ok) {
+    throw new Error("Failed to fetch player list from Riot API");
+  }
+
+  const players = await res.json();
+  let puuid = null;
+  players.forEach((player: PlayerSummary) => {
+    if (player.riot_id === riotId && player.tag_line === tagLine) {
+      puuid = player.puuid;
+    }
+  });
+  
+  return puuid;
+}
+
 function makeRiotId(seed: string): string {
   return `player${hash(seed).toString().slice(0, 4)}`;
 }
@@ -321,23 +338,36 @@ function makeRuneEntry(seed: string, index: number): RuneEntry {
   };
 }
 
-const inMemoryPlayers: PlayerSummary[] = [
-  { puuid: makePuuid("faker"), riot_id: "Faker", tag_line: "KR1", region: "KR" },
-  { puuid: makePuuid("doublelift"), riot_id: "Doublelift", tag_line: "NA", region: "NA1" },
-  { puuid: makePuuid("caps"), riot_id: "Caps", tag_line: "EUW", region: "EUW1" },
-];
-
-function resolvePlayer(puuid: string): PlayerSummary {
-  const found = inMemoryPlayers.find((player) => player.puuid === puuid);
-  if (found) {
-    return found;
-  }
-
+async function resolvePlayer(puuid: string){
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/players/${puuid}/`);
+    if (!res.ok) {
+      if (res.status === 404) {
+        throw new MockApiError(
+          404,
+          "Player not found on Riot servers"
+        );
+      }
+      if (res.status === 503) {
+        throw new MockApiError(
+          503,
+          "Riot API rate limit hit — try again in 30 seconds"
+        );
+      }
+      if (res.status === 502) {
+        throw new MockApiError(
+          502,
+          "Riot API error — check API key"
+        );
+      }
+      throw new Error("Unexpected API error");
+    }
+  const player = await res.json();
   return {
     puuid,
-    riot_id: makeRiotId(puuid),
-    tag_line: "MVP",
-    region: pick(createRng(puuid), REGIONS),
+    riot_id: player.riot_id,
+    tag_line: player.tag_line,
+    region: player.region,
+    created_at: player.created_at
   };
 }
 
@@ -409,7 +439,12 @@ const runesMapStatic: RuneMapEntry[] = [
 
 const frontendMvpClient: FrontendMvpClient = {
   async listPlayers() {
-    return [...inMemoryPlayers];
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/players/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch player list from Riot API");
+    }
+    const players = await res.json();
+    return players.slice(0, 20); // Return only the first 20 for listing
   },
 
   async ingestPlayer(payload) {
@@ -425,7 +460,7 @@ const frontendMvpClient: FrontendMvpClient = {
       throw new MockApiError(502, "Riot API error — check API key");
     }
 
-    const puuid = makePuuid(`${payload.gameName}:${payload.tagLine}:${Date.now()}`);
+    const puuid = await getPuuidFromRiotId(payload.gameName, payload.tagLine) || "";
 
     const player: PlayerSummary = {
       puuid,
@@ -434,27 +469,30 @@ const frontendMvpClient: FrontendMvpClient = {
       region: payload.platform,
     };
 
-    inMemoryPlayers.unshift(player);
     return player;
   },
 
   async getPlayer(puuid) {
     const player = resolvePlayer(puuid);
     return {
-      ...player,
-      created_at: formatDateFromOffset(randomInt(createRng(`${puuid}:created`), 20, 600)),
+      ...player
     };
   },
 
   async getPlayerMetrics(puuid) {
-    const rng = createRng(`${puuid}:metrics`);
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/metrics/player/${puuid}/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch player metrics from Riot API");
+    }
+    const metrics = await res.json();
+
     return {
-      matches_played: randomInt(rng, 65, 460),
-      win_rate: randomFloat(rng, 42, 74, 1),
-      avg_kda: randomFloat(rng, 1.8, 5.9, 2),
-      avg_cs_per_min: randomFloat(rng, 5.1, 9.7, 2),
-      avg_gold_per_min: randomFloat(rng, 320, 590, 1),
-      avg_vision_per_min: randomFloat(rng, 0.8, 2.2, 2),
+      matches_played: metrics.matches,
+      win_rate: metrics.win_rate,
+      avg_kda: metrics.kda,
+      avg_cs_per_min: metrics.cs_per_min,
+      avg_gold_per_min: metrics.gold_per_min,
+      avg_vision_per_min: metrics.vision_per_min,
     };
   },
 
