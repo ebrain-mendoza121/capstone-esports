@@ -59,7 +59,7 @@ export interface MatchHistoryEntry {
   patch_version: string;
   kda: number;
   cs_per_min: number;
-  queue: QueueCode;
+  queue_id: QueueCode;
 }
 
 export interface TeamStats {
@@ -192,10 +192,10 @@ export interface FrontendMvpClient {
   // Page 2
   getPlayer(puuid: string): Promise<PlayerDetail>;
   getPlayerMetrics(puuid: string): Promise<PlayerMetrics>;
-  getPlayerRunes(puuid: string, limit: number): Promise<RuneEntry[]>;//TODO
+  getPlayerRunes(puuid: string, limit: number): Promise<RuneEntry[]>;
 
   // Page 3
-  getMatchesByPlayer(puuid: string, limit: number): Promise<MatchHistoryEntry[]>;//TODO
+  getMatchesByPlayer(puuid: string, limit: number): Promise<MatchHistoryEntry[]>;
 
   // Page 4
   getMatch(matchId: string): Promise<MatchDetail>;//TODO
@@ -371,35 +371,6 @@ async function resolvePlayer(puuid: string){
   };
 }
 
-function makeMatchRow(puuid: string, index: number): MatchHistoryEntry {
-  const rng = createRng(`${puuid}:match:${index}`);
-  const kills = randomInt(rng, 1, 18);
-  const deaths = randomInt(rng, 1, 10);
-  const assists = randomInt(rng, 2, 22);
-  const cs = randomInt(rng, 120, 360);
-  const duration = randomInt(rng, 1200, 2400);
-
-  return {
-    match_id: `MATCH_${hash(`${puuid}:${index}`)}`,
-    champion: pick(rng, CHAMPIONS),
-    champion_id: randomInt(rng, 1, 300),
-    role: pick(rng, ROLES),
-    kills,
-    deaths,
-    assists,
-    cs,
-    gold_earned: randomInt(rng, 8200, 19700),
-    vision_score: randomInt(rng, 12, 92),
-    items: Array.from({ length: 7 }, () => randomInt(rng, 1001, 7000)),
-    win: rng() > 0.46,
-    game_duration: duration,
-    patch_version: pick(rng, PATCHES),
-    kda: randomFloat(rng, 1.2, 6.8, 2),
-    cs_per_min: Number((cs / (duration / 60)).toFixed(2)),
-    queue: pick(rng, QUEUES),
-  };
-}
-
 function makeMatchParticipants(matchId: string): MatchParticipant[] {
   const rng = createRng(`${matchId}:participants`);
 
@@ -497,11 +468,22 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getPlayerRunes(puuid, limit) {
-    return Array.from({ length: limit }, (_, index) => makeRuneEntry(puuid, index));
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/runes/?limit=${limit}`);
+    if (!res.ok) {      throw new Error("Failed to fetch player rune history from Riot API");
+    }
+    const runes = await res.json();
+
+    return [...runes.runes];
   },
 
   async getMatchesByPlayer(puuid, limit) {
-    return Array.from({ length: limit }, (_, index) => makeMatchRow(puuid, index));
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/matches/player/${puuid}/?limit=${limit}`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch player match history from Riot API");
+    }
+    const matches = await res.json();
+
+    return [...matches];
   },
 
   async getMatch(matchId) {

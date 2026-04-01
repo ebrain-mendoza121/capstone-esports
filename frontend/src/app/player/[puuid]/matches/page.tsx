@@ -50,7 +50,7 @@ export default function MatchHistoryPage() {
 
   const filteredMatches = useMemo(() => {
     return matches.filter((match) => {
-      const queuePass = queueFilter === "all" ? true : match.queue === queueFilter;
+      const queuePass = queueFilter === "all" ? true : match.queue_id === queueFilter;
       const resultPass =
         resultFilter === "all"
           ? true
