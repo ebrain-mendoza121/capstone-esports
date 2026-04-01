@@ -205,9 +205,9 @@ export interface FrontendMvpClient {
   getMatchDraft(matchId: string): Promise<DraftData>;
 
   // Page 5
-  getPlayerBanAnalytics(puuid: string, limit: number): Promise<PlayerBanAnalytics>;//TODO
-  getGlobalMostBanned(limit: number): Promise<GlobalBanEntry[]>;//TODO
-  getChampionBanRate(championId: number): Promise<ChampionBanRate>;//TODO
+  getPlayerBanAnalytics(puuid: string, limit: number): Promise<PlayerBanAnalytics>;
+  getGlobalMostBanned(limit: number): Promise<GlobalBanEntry[]>;
+  getChampionBanRate(championId: number): Promise<ChampionBanRate>;
 
   // Page 6
   getRunesMap(): Promise<RuneMapEntry[]>;//TODO
@@ -521,41 +521,56 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getPlayerBanAnalytics(puuid, limit) {
-    const rng = createRng(`${puuid}:bans:${limit}`);
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/bans/?limit=${limit}`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch player ban analytics from Riot API");
+    }
+    const banAnalytics = await res.json();
+    const aggregateBans = (
+      bans: Array<{ champion_id: number; champion_name: string }>
+    ): BanEntry[] => {
+      const byChampion = new Map<number, BanEntry>();
 
-    const makeEntry = (): BanEntry => ({
-      champion_id: randomInt(rng, 1, 300),
-      champion_name: pick(rng, CHAMPIONS),
-      count: randomInt(rng, 4, 60),
-    });
+      bans.forEach((ban) => {
+        const existing = byChampion.get(ban.champion_id);
+
+        if (existing) {
+          existing.count += 1;
+        } else {
+          byChampion.set(ban.champion_id, {
+            champion_id: ban.champion_id,
+            champion_name: ban.champion_name,
+            count: 1,
+          });
+        }
+      });
+
+      return Array.from(byChampion.values()).sort((a, b) => b.count - a.count);
+    };
 
     return {
-      matches_analyzed: limit,
-      banned_against: Array.from({ length: 10 }, makeEntry),
-      banned_by_team: Array.from({ length: 10 }, makeEntry),
+      matches_analyzed: banAnalytics.matches_analyzed,
+      banned_against: aggregateBans(banAnalytics.bans_against ?? []),
+      banned_by_team: aggregateBans(banAnalytics.bans_by_team ?? []),
     };
   },
 
   async getGlobalMostBanned(limit) {
-    const rng = createRng(`global-bans:${limit}`);
-    return Array.from({ length: limit }, () => ({
-      champion_id: randomInt(rng, 1, 300),
-      champion_name: pick(rng, CHAMPIONS),
-      ban_count: randomInt(rng, 120, 940),
-    }));
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/bans/most-banned?limit=${limit}`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch global ban data from Riot API");
+    }
+    const globalBans = await res.json();
+    return [...globalBans];
   },
 
   async getChampionBanRate(championId) {
-    const rng = createRng(`champion-rate:${championId}`);
-    const totalMatches = randomInt(rng, 600, 5000);
-    const timesBanned = randomInt(rng, 50, Math.floor(totalMatches * 0.45));
-
-    return {
-      champion_name: CHAMPIONS[championId % CHAMPIONS.length],
-      ban_rate: Number(((timesBanned / totalMatches) * 100).toFixed(2)),
-      times_banned: timesBanned,
-      total_matches: totalMatches,
-    };
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/champion/${championId}/ban-rate/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch champion ban rate from Riot API");
+    }
+    const banRate = await res.json();
+    return banRate;
   },
 
   async getRunesMap() {
