@@ -93,7 +93,7 @@ export default function PlayerDashboardPage() {
                 </article>
                 <article className={styles.kpiCard}>
                   <p className={styles.kpiLabel}>Win Rate</p>
-                  <strong className={styles.kpiValue}>{metrics.win_rate}%</strong>
+                  <strong className={styles.kpiValue}>{metrics.win_rate*100}%</strong>
                 </article>
                 <article className={styles.kpiCard}>
                   <p className={styles.kpiLabel}>KDA</p>
