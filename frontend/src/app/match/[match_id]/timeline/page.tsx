@@ -102,7 +102,7 @@ export default function TimelinePage() {
       return "";
     }
 
-    return `Frame rows: ${availability.frame_rows} · Event rows: ${availability.event_rows} · Interval: ${availability.frame_interval_ms}ms`;
+    return `Frame rows: ${availability.participant_frame_rows} · Event rows: ${availability.event_rows} · Interval: ${availability.frame_interval_ms}ms`;
   }, [availability]);
 
   return (
@@ -228,12 +228,12 @@ export default function TimelinePage() {
                   </thead>
                   <tbody>
                     {events.map((event) => (
-                      <tr key={event.id}>
+                      <tr key={event.event_id}>
                         <td>{formatDuration(event.timestamp)}</td>
                         <td>
                           <span className={styles.badge}>{event.type}</span>
                         </td>
-                        <td>{event.detail}</td>
+                        <td>{event.detail.killerId}</td>
                       </tr>
                     ))}
                   </tbody>

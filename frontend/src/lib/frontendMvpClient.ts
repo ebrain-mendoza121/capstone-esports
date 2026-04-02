@@ -136,13 +136,12 @@ export interface ChampionBanRate {
 }
 
 export interface RuneMapEntry {
-  rune_id: number;
-  rune_name: string;
+  [runeId: string]: string;
 }
 
 export interface TimelineAvailability {
   match_id: string;
-  frame_rows: number;
+  participant_frame_rows: number;
   event_rows: number;
   frame_interval_ms: number;
   participant_puuids: string[];
@@ -167,10 +166,12 @@ export type TimelineEventType =
   | "ITEM_PURCHASED";
 
 export interface TimelineEvent {
-  id: string;
+  event_id: string;
   timestamp: number;
   type: TimelineEventType;
-  detail: string;
+  detail: {
+    killerId: number;
+  };
 }
 
 export interface TimelineEventsResponse {
@@ -324,23 +325,6 @@ function makeRiotId(seed: string): string {
   return `player${hash(seed).toString().slice(0, 4)}`;
 }
 
-function makeRuneEntry(seed: string, index: number): RuneEntry {
-  const rng = createRng(`${seed}:rune:${index}`);
-
-  return {
-    match_id: `EUW1_${hash(`${seed}:${index}`)}`,
-    champion: pick(rng, CHAMPIONS),
-    keystone_name: pick(rng, KEYSTONES),
-    primary_style_name: pick(rng, PRIMARY_STYLES),
-    primary_slot1_name: pick(rng, SLOT_NAMES.primary),
-    primary_slot2_name: pick(rng, SLOT_NAMES.primary),
-    primary_slot3_name: pick(rng, SLOT_NAMES.primary),
-    sub_style_name: pick(rng, SUB_STYLES),
-    sub_slot1_name: pick(rng, SLOT_NAMES.sub),
-    sub_slot2_name: pick(rng, SLOT_NAMES.sub),
-  };
-}
-
 async function resolvePlayer(puuid: string){
   const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/players/${puuid}/`);
     if (!res.ok) {
@@ -373,43 +357,6 @@ async function resolvePlayer(puuid: string){
     created_at: player.created_at
   };
 }
-
-function makeMatchParticipants(matchId: string): MatchParticipant[] {
-  const rng = createRng(`${matchId}:participants`);
-
-  return Array.from({ length: 10 }, (_, index) => {
-    const teamId: 100 | 200 = index < 5 ? 100 : 200;
-    const role = ROLES[index % ROLES.length];
-    const participantPuuid = makePuuid(`${matchId}:${index}`);
-
-    return {
-      puuid: participantPuuid,
-      riot_id: makeRiotId(participantPuuid),
-      champion: pick(rng, CHAMPIONS),
-      role,
-      kills: randomInt(rng, 0, 16),
-      deaths: randomInt(rng, 0, 12),
-      assists: randomInt(rng, 1, 24),
-      cs: randomInt(rng, 90, 360),
-      gold_earned: randomInt(rng, 7000, 20000),
-      total_damage: randomInt(rng, 8000, 58000),
-      vision_score: randomInt(rng, 8, 88),
-      items: Array.from({ length: 7 }, () => randomInt(rng, 1001, 7000)),
-      perks:{keystone: pick(rng, KEYSTONES)},
-      team_id: teamId,
-      win: teamId === 100,
-    };
-  });
-}
-
-const runesMapStatic: RuneMapEntry[] = [
-  { rune_id: 8005, rune_name: "Press the Attack" },
-  { rune_id: 8010, rune_name: "Conqueror" },
-  { rune_id: 8229, rune_name: "Arcane Comet" },
-  { rune_id: 8128, rune_name: "Dark Harvest" },
-  { rune_id: 8465, rune_name: "Guardian" },
-  { rune_id: 8369, rune_name: "First Strike" },
-];
 
 const frontendMvpClient: FrontendMvpClient = {
   async listPlayers() {
@@ -574,33 +521,47 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getRunesMap() {
-    return runesMapStatic;
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/runes/map/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch runes map from Riot API");
+    }
+    const runesMap = await res.json();
+    return runesMap;
   },
 
   async getPlayerRuneHistory(puuid, limit) {
-    return Array.from({ length: limit }, (_, index) => makeRuneEntry(`${puuid}:history`, index));
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/runes/?limit=${limit}`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch player rune history from Riot API");
+    }
+    const runes = await res.json();
+    return [...runes.runes];
   },
 
   async getTimelineAvailability(matchId) {
-    if (hash(matchId) % 5 === 0) {
-      throw new MockApiError(
-        404,
-        "Timeline data not available for this match. Re-ingest with fetch_timeline=true.",
-      );
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/`);
+    if (!res.ok) {
+      if (res.status === 404) {
+        throw new MockApiError(
+          404,
+          "Timeline data not available for this match. Re-ingest with fetch_timeline=true."
+        );
+      }
+      throw new Error("Failed to fetch timeline availability from Riot API");
     }
-
-    const participants = makeMatchParticipants(matchId).map((entry) => entry.puuid);
-
-    return {
-      match_id: matchId,
-      frame_rows: randomInt(createRng(`${matchId}:timeline-frames`), 24, 42),
-      event_rows: randomInt(createRng(`${matchId}:timeline-events`), 90, 180),
-      frame_interval_ms: 60000,
-      participant_puuids: participants,
-    };
+    const timelineMeta = await res.json();
+    const matchDetails = await this.getMatch(matchId); // Ensure match details are loaded to get participant puuids
+    const participant_puuids = matchDetails.participants.map((p) => p.puuid);
+    return {...timelineMeta, participant_puuids};  
   },
 
   async getTimelineFramesByPuuid(matchId, puuid) {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/frames/by-puuid/${puuid}/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch timeline frames from Riot API");
+    }
+    const frames = await res.json();
+    return frames;
     const rng = createRng(`${matchId}:${puuid}:frames`);
     let totalGold = randomInt(rng, 500, 900);
 
@@ -622,29 +583,36 @@ const frontendMvpClient: FrontendMvpClient = {
     });
   },
 
-  async getTimelineEvents(matchId, limit, cursor) {
-    const rng = createRng(`${matchId}:events`);
-    const totalEvents = 180;
-    const start = cursor ? Number(cursor) : 0;
-    const end = Math.min(start + limit, totalEvents);
+async getTimelineEvents(matchId, limit, cursor) {
+  const url =
+    `${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/events/?limit=${limit}` +
+    (cursor ? `&cursor=${cursor}` : "");
 
-    const events = Array.from({ length: end - start }, (_, localIndex) => {
-      const index = start + localIndex;
-      const eventType = pick(rng, TIMELINE_EVENT_TYPES);
+  const res = await fetch(url);
 
-      return {
-        id: `${matchId}-${index}`,
-        timestamp: index * 15000,
-        type: eventType,
-        detail: `${eventType} event payload ${randomInt(rng, 1000, 9999)}`,
-      };
-    });
+  if (!res.ok) {
+    throw new Error("Failed to fetch timeline events from Riot API");
+  }
 
-    return {
-      events,
-      next_cursor: end >= totalEvents ? null : String(end),
-    };
-  },
+  const data = await res.json();
+
+  return {
+    events: (data.events ?? []).map(
+      (event: {
+        event_id: number;
+        timestamp: number;
+        type: string;
+        detail: unknown;
+      }) => ({
+        id: String(event.event_id),
+        timestamp: event.timestamp,
+        type: event.type,
+        detail: event.detail,
+      })
+    ),
+    next_cursor: data.next_cursor ?? null,
+  };
+}
 };
 
 export { frontendMvpClient };
