@@ -37,6 +37,7 @@ from app.services.ai_service import (
     get_champion_recommendations,
     get_model_status,
     get_player_playstyle,
+    get_threat_weights,
     predict_cs,
     predict_earlygame,
     predict_kda,
@@ -45,6 +46,7 @@ from app.services.ai_service import (
     train_cs_regressor,
     train_earlygame_model,
     train_kda_regressor,
+    train_matchup_predictor,
     train_playstyle_model,
     train_win_predictor,
 )
@@ -88,6 +90,25 @@ def train_win_prediction(db: Session = Depends(get_db)) -> dict:
     """
     try:
         return train_win_predictor(db)
+    except InsufficientDataError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/train/matchup-prediction", summary="Train match-level win-prediction model")
+def train_matchup_prediction(db: Session = Depends(get_db)) -> dict:
+    """
+    Train the matchup-level win-prediction model.
+
+    Unlike /train/win-prediction (per-player rows), this model trains on one
+    row per match using team-vs-team differential features. This directly
+    captures relative team strength rather than isolated player stats,
+    resulting in meaningfully higher AUC.
+
+    Requires at least 50 unique ranked matches in the database.
+    Model saved to matchup_predictor.joblib.
+    """
+    try:
+        return train_matchup_predictor(db)
     except InsufficientDataError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -136,11 +157,18 @@ def train_early_game(db: Session = Depends(get_db)) -> dict:
     Requires matches to have been ingested with ``fetch_timeline=true``.
 
     Raises 422 when fewer than 50 matches with timeline frame data exist.
+    Raises 503 on any unexpected training error.
     """
     try:
         return train_earlygame_model(db)
     except InsufficientDataError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Unexpected error training early-game model")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Early-game model training failed: {exc}",
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -157,9 +185,163 @@ def models_status() -> dict:
     return get_model_status()
 
 
+@router.get("/opponent-coverage", summary="Frequent untracked opponents to ingest next")
+def opponent_coverage(
+    limit: int = 20,
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Find the most frequently occurring opponents across all tracked players'
+    match histories who are NOT yet fully ingested (stub players only).
+
+    Ingesting these players will directly populate the opponent differential
+    features (win_rate_diff, kda_diff, cs_diff) used by the win-prediction
+    model, improving AUC.
+
+    Returns:
+        tracked_players   - how many fully tracked players exist
+        stub_players      - how many stub-only opponents exist
+        top_opponents     - list of {puuid, riot_id, tag_line, appearances}
+                           sorted by appearance count descending
+        coverage_pct      - % of opponent slots that are fully tracked
+    """
+    from sqlalchemy import text as _text
+
+    sql = _text("""
+        WITH tracked AS (
+            -- Players who have at least one derived_metrics row = fully ingested
+            SELECT DISTINCT p.id, p.puuid
+            FROM players p
+            JOIN derived_metrics dm ON dm.puuid = p.puuid
+        ),
+        stub AS (
+            -- Players with NO derived_metrics = stub only
+            SELECT p.id, p.puuid, p.riot_id, p.tag_line
+            FROM players p
+            WHERE NOT EXISTS (
+                SELECT 1 FROM derived_metrics dm WHERE dm.puuid = p.puuid
+            )
+        ),
+        opponent_appearances AS (
+            -- Count how many times each stub player appears in tracked players' matches
+            SELECT
+                ps.player_id,
+                COUNT(*) AS appearances
+            FROM participant_stats ps
+            -- The match must contain at least one tracked player on the other team
+            WHERE EXISTS (
+                SELECT 1
+                FROM participant_stats ps2
+                JOIN tracked t ON t.id = ps2.player_id
+                WHERE ps2.match_id = ps.match_id
+                  AND ps2.team_id != ps.team_id
+            )
+            AND ps.player_id IN (SELECT id FROM stub)
+            GROUP BY ps.player_id
+        )
+        SELECT
+            s.puuid,
+            s.riot_id,
+            s.tag_line,
+            oa.appearances
+        FROM opponent_appearances oa
+        JOIN stub s ON s.id = oa.player_id
+        ORDER BY oa.appearances DESC
+        LIMIT :limit
+    """)
+
+    rows = db.execute(sql, {"limit": limit}).mappings().all()
+
+    # Summary counts
+    tracked_count = db.execute(_text("""
+        SELECT COUNT(DISTINCT p.id) FROM players p
+        JOIN derived_metrics dm ON dm.puuid = p.puuid
+    """)).scalar() or 0
+
+    stub_count = db.execute(_text("""
+        SELECT COUNT(*) FROM players p
+        WHERE NOT EXISTS (
+            SELECT 1 FROM derived_metrics dm WHERE dm.puuid = p.puuid
+        )
+    """)).scalar() or 0
+
+    total_opponent_slots = db.execute(_text("""
+        SELECT COUNT(*) FROM participant_stats ps
+        WHERE EXISTS (
+            SELECT 1 FROM players p
+            JOIN derived_metrics dm ON dm.puuid = p.puuid
+            WHERE p.id = ps.player_id
+        )
+    """)).scalar() or 1
+
+    tracked_opponent_slots = db.execute(_text("""
+        SELECT COUNT(*) FROM participant_stats ps
+        JOIN players p ON p.id = ps.player_id
+        JOIN derived_metrics dm ON dm.puuid = p.puuid
+    """)).scalar() or 0
+
+    coverage_pct = round(100.0 * tracked_opponent_slots / max(total_opponent_slots, 1), 1)
+
+    return {
+        "tracked_players":   tracked_count,
+        "stub_players":      stub_count,
+        "coverage_pct":      coverage_pct,
+        "interpretation":    (
+            f"{coverage_pct}% of opponent match slots belong to fully tracked players. "
+            f"Ingest the top opponents below to increase differential feature coverage."
+        ),
+        "top_opponents": [
+            {
+                "puuid":       r["puuid"],
+                "riot_id":     r["riot_id"],
+                "tag_line":    r["tag_line"],
+                "appearances": r["appearances"],
+            }
+            for r in rows
+        ],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Inference endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/threat-weights", summary="Current threat score weights")
+def threat_weights(db: Session = Depends(get_db)) -> dict:
+    """
+    Return the weights currently used by the threat score formula.
+
+    When the win-prediction model has been trained and its AUC >= 0.60,
+    the weights are derived from that model's feature importances.
+    Otherwise the hand-tuned defaults (win_rate: 4.0, kda: 4.0) are used.
+
+    Response fields:
+    - win_rate_weight   — multiplier for normalised win rate (max 4.0 by default)
+    - kda_weight        — multiplier for normalised KDA      (max 4.0 by default)
+    - source            — "model" if backed by ML, "default" if hand-tuned
+    - model_auc         — AUC of the underlying model (null if default)
+    - feature_breakdown — full per-feature importance map (null if default)
+    - interpretation    — human-readable explanation of the current weights
+    """
+    w = get_threat_weights(db)
+
+    if w["source"] == "model":
+        interpretation = (
+            f"Weights derived from the trained win-prediction model "
+            f"(AUC {w['model_auc']:.3f}). "
+            f"Win rate contributes {w['win_rate_weight']:.2f} pts, "
+            f"KDA contributes {w['kda_weight']:.2f} pts out of 8 available "
+            f"(plus up to 2 pts confidence bonus)."
+        )
+    else:
+        interpretation = (
+            "Using hand-tuned defaults (win_rate: 4.0, kda: 4.0). "
+            "Train the win-prediction model (POST /ai/train/win-prediction) "
+            "and ensure it reaches AUC >= 0.60 to unlock model-backed weights."
+        )
+
+    return {**w, "interpretation": interpretation}
 
 
 @router.get("/playstyle/{puuid}", summary="Player playstyle cluster")
@@ -310,3 +492,148 @@ def early_game_prediction(
     not ingested with ``fetch_timeline=true``.
     """
     return predict_earlygame(db, match_id)
+
+
+# ---------------------------------------------------------------------------
+# Opponent feature enrichment — fills opp_avg_* columns for training data
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/enrich/opponent-features",
+    summary="Analyse opponent-feature coverage for training data",
+)
+def enrich_opponent_features(
+    limit: int = Query(500, description="Max matches to analyse"),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    **Fast DB-only** opponent coverage analysis — no Riot API calls, completes
+    in milliseconds.
+
+    Explains how many training matches already have opponent rolling stats
+    available (because the opponents were also tracked and have derived_metrics)
+    vs matches where opponent features will fall back to neutral league-wide
+    averages (win_rate=0.5, kda=2.5, cs_min=7.0).
+
+    The win-predictor model is already trained with these neutral fallbacks for
+    stub opponents, so this endpoint is purely diagnostic.  Run it after
+    ingesting new players to see how coverage improves.
+
+    To truly improve opponent features beyond neutral defaults:
+      1. Ingest the opponent players directly via ``POST /ingest/player``
+      2. Retrain: ``POST /ai/train/win-prediction``
+    """
+    from sqlalchemy import text as _text
+
+    try:
+        # ---------------------------------------------------------------
+        # For each recent match, count how many of the 10 participants
+        # have at least 5 games of derived_metrics history in the DB.
+        # Those are the players who contribute real (non-fallback) rolling
+        # stats to the opponent feature columns.
+        # ---------------------------------------------------------------
+        sql = _text("""
+            WITH match_participants AS (
+                SELECT
+                    ps.match_id,
+                    ps.team_id,
+                    ps.player_id,
+                    p.puuid
+                FROM participant_stats ps
+                JOIN players p ON p.id = ps.player_id
+                WHERE ps.team_id IN (100, 200)
+            ),
+            player_history AS (
+                SELECT puuid, COUNT(*) AS game_count
+                FROM derived_metrics
+                GROUP BY puuid
+            ),
+            match_team_coverage AS (
+                SELECT
+                    mp.match_id,
+                    mp.team_id,
+                    COUNT(*) AS team_size,
+                    COUNT(CASE WHEN COALESCE(ph.game_count, 0) >= 5 THEN 1 END) AS players_with_history
+                FROM match_participants mp
+                LEFT JOIN player_history ph ON ph.puuid = mp.puuid
+                GROUP BY mp.match_id, mp.team_id
+            )
+            SELECT
+                match_id,
+                team_id,
+                team_size,
+                players_with_history,
+                CASE WHEN players_with_history > 0 THEN true ELSE false END AS has_any_opp_data
+            FROM match_team_coverage
+            ORDER BY match_id DESC
+            LIMIT :limit
+        """)
+        rows = db.execute(sql, {"limit": limit}).mappings().all()
+    except Exception as exc:
+        logger.exception("Enrichment coverage query failed")
+        raise HTTPException(status_code=500, detail=f"DB query failed: {exc}") from exc
+
+    if not rows:
+        return {
+            "status": "no_data",
+            "message": "No participant_stats rows found. Ingest some matches first.",
+            "matches_analysed": 0,
+        }
+
+    total_teams = len(rows)
+    teams_with_any_data = sum(1 for r in rows if r["has_any_opp_data"])
+    teams_fully_covered = sum(
+        1 for r in rows if r["players_with_history"] >= 3  # ≥3 of 5 have history
+    )
+    total_players = sum(r["team_size"] for r in rows)
+    players_with_history = sum(r["players_with_history"] for r in rows)
+
+    coverage_pct = round(players_with_history / total_players * 100, 1) if total_players else 0.0
+
+    return {
+        "status": "complete",
+        "matches_analysed":   total_teams // 2,   # two teams per match
+        "teams_analysed":     total_teams,
+        "teams_with_any_opp_history":   teams_with_any_data,
+        "teams_with_good_opp_history":  teams_fully_covered,
+        "total_opponent_player_slots":  total_players,
+        "slots_with_history":           players_with_history,
+        "coverage_pct":                 coverage_pct,
+        "explanation": (
+            f"{coverage_pct}% of opponent player-slots have real rolling stats in the DB. "
+            f"The remaining {100 - coverage_pct:.1f}% fall back to neutral league averages "
+            f"(win_rate=0.50, kda=2.50, cs_min=7.00) during win-predictor training."
+        ),
+        "next_step": (
+            "To improve coverage: POST /ingest/player for each opponent, "
+            "then POST /ai/train/win-prediction."
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Champion cluster training endpoint
+# ---------------------------------------------------------------------------
+
+
+@router.post("/train/champion-clusters", summary="Train champion archetype clustering model")
+def train_champion_clusters_endpoint(db: Session = Depends(get_db)) -> dict:
+    """
+    Cluster all champions in tracked matches by their aggregate stat profiles
+    (KDA, CS/min, gold/min, damage share, vision, kill participation).
+
+    Produces 4 archetypes: farm_carry, skirmisher, utility, versatile.
+    Used to match player playstyle → champion recommendations.
+
+    Requires at least 8 distinct champions with 3+ games each.
+    Run after ingesting a representative set of matches.
+    """
+    from app.services.ai_service import train_champion_clusters, InsufficientDataError
+    try:
+        return train_champion_clusters(db)
+    except InsufficientDataError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        logger.exception("champion-clusters training error")
+        raise HTTPException(status_code=500, detail=str(e))

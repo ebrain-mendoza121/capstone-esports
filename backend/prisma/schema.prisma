@@ -16,6 +16,7 @@ model derived_metrics {
   id                 Int     @id @default(autoincrement())
   match_id           String  @db.VarChar
   puuid              String  @db.VarChar
+  role               String? @db.VarChar(32)
   kda                Float?
   cs_per_min         Float?
   gold_per_min       Float?
@@ -172,7 +173,8 @@ model match_timelines {
   match_id              String                       @id @db.VarChar(64)
   frame_interval        BigInt?
   end_of_game_result    String?                      @db.VarChar(64)
-  raw_timeline_json     Json?
+  // raw_timeline_json removed — raw blob was redundant and consumed ~500MB.
+  // All necessary data is parsed into timeline_participant_frames and timeline_events.
   matches               matches                      @relation(fields: [match_id], references: [match_id], onDelete: Cascade, onUpdate: NoAction)
   participant_frames    timeline_participant_frames[]
   timeline_events       timeline_events[]

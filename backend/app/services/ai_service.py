@@ -38,6 +38,7 @@ from app.services.feature_extractor import (
     ROLLING_FEATURES,
     TIMELINE_FEATURES,
     get_all_rolling_features_bulk,
+    get_all_timeline_features_bulk,
     get_champion_stats,
     get_clustering_features,
     get_rolling_features,
@@ -59,6 +60,7 @@ _ARTIFACT_ROUTE_SLUG: dict[str, str] = {
     "playstyle_kmeans":    "playstyle",
     "win_predictor":       "win-prediction",
     "kda_regressor":       "kda-regression",
+    "champion_clusters":   "champion-clusters",
     "cs_regressor":        "cs-regression",
     "earlygame_predictor": "early-game",
 }
@@ -479,8 +481,9 @@ def get_champion_recommendations(
     """
     Return ranked champion recommendations for one player.
 
-    Uses Bayesian-smoothed win rate + normalized KDA/CS scoring.
-    No ML model required — pure SQL aggregation + Python scoring.
+    Uses Bayesian-smoothed win rate + role-aware KDA/CS scoring +
+    playstyle-cluster affinity boost.  No ML model required — pure SQL
+    aggregation + Python scoring.
 
     Args:
         top_n: Maximum recommendations to return (capped at 20).
@@ -499,6 +502,23 @@ def get_champion_recommendations(
             return []
 
     global_avg_wr = float(df["win_rate"].mean()) if len(df) > 0 else 0.5
+
+    # --- Playstyle affinity: boost champions that match the player's cluster ---
+    # Maps archetype label → roles that naturally fit that playstyle.
+    # Affinity boost is added to final composite score (+0.08 max).
+    _PLAYSTYLE_ROLE_AFFINITY: dict[str, list[str]] = {
+        "carry":           ["BOTTOM", "MIDDLE"],
+        "skirmisher":      ["JUNGLE", "TOP"],
+        "support_utility": ["UTILITY", "SUPPORT"],
+        "farm_efficiency": ["BOTTOM", "MIDDLE", "TOP"],
+    }
+    player_playstyle: str = "unknown"
+    try:
+        ps = get_player_playstyle(db, puuid)
+        player_playstyle = ps.get("playstyle_label", "unknown")
+    except Exception:
+        pass  # playstyle model not trained — affinity boost skipped
+    affinity_roles: list[str] = _PLAYSTYLE_ROLE_AFFINITY.get(player_playstyle, [])
     # Use global max (all players' games on that champ) isn't available here
     # so cap exp_weight at a fixed reference point instead of using the
     # player's own max_games — avoids inflating one-trick picks.
@@ -546,11 +566,20 @@ def get_champion_recommendations(
         # --- Win rate: Bayesian-smoothed ---
         smoothed_wr = (total_wins + K * global_avg_wr) / (games + K)
 
-        # --- KDA: normalized to role-typical ceiling (5.0 for carries) ---
-        norm_kda = min(float(row["avg_kda"]) / 5.0, 1.0)
+        # --- KDA: role-aware ceiling — supports cap at 3.5, carries at 8.0 ---
+        _KDA_CAP_BY_ROLE: dict[str, float] = {
+            "BOTTOM":  8.0,
+            "MIDDLE":  8.0,
+            "TOP":     6.0,
+            "JUNGLE":  6.0,
+            "UTILITY": 3.5,
+            "SUPPORT": 3.5,
+        }
+        role_str = str(row["role"]).upper() if row["role"] is not None else ""
+        kda_cap = _KDA_CAP_BY_ROLE.get(role_str, 6.0)
+        norm_kda = min(float(row["avg_kda"]) / kda_cap, 1.0)
 
         # --- CS: role-aware cap so utility roles aren't penalized ---
-        role_str = str(row["role"]).upper() if row["role"] is not None else ""
         cs_cap = _CS_CAP_BY_ROLE.get(role_str, 8.0)
         norm_cs = min(float(row["avg_cs_per_min"]) / cs_cap, 1.0)
 
@@ -562,13 +591,18 @@ def get_champion_recommendations(
         age_ms = max(now_ms - last_ts, 0.0)
         recency_weight = math.exp(-age_ms / _RECENCY_HALF_LIFE_MS) if last_ts > 0 else 0.5
 
-        # --- Final composite score ---
+        # --- Playstyle affinity boost: +0.08 when role matches player's cluster ---
+        affinity_boost = 0.08 if role_str in affinity_roles else 0.0
+        playstyle_match = role_str in affinity_roles
+
+        # --- Final composite score (weights sum to 1.0 before affinity) ---
         score = (
-            smoothed_wr    * 0.38
-            + norm_kda     * 0.22
-            + norm_cs      * 0.18
-            + exp_weight   * 0.12
+            smoothed_wr      * 0.38
+            + norm_kda       * 0.22
+            + norm_cs        * 0.18
+            + exp_weight     * 0.12
             + recency_weight * 0.10
+            + affinity_boost
         )
 
         champion_id = (
@@ -591,12 +625,15 @@ def get_champion_recommendations(
             "avg_cs_per_min":    round(float(row["avg_cs_per_min"]), 3),
             "recency_weight":    round(recency_weight, 3),
             "last_played_ts":    int(last_ts) if last_ts > 0 else None,
+            "playstyle_match":   playstyle_match,
+            "player_playstyle":  player_playstyle,
             "score_breakdown": {
-                "win_rate":  round(smoothed_wr * 0.38, 4),
-                "kda":       round(norm_kda * 0.22, 4),
-                "cs":        round(norm_cs * 0.18, 4),
-                "experience": round(exp_weight * 0.12, 4),
-                "recency":   round(recency_weight * 0.10, 4),
+                "win_rate":        round(smoothed_wr * 0.38, 4),
+                "kda":             round(norm_kda * 0.22, 4),
+                "cs":              round(norm_cs * 0.18, 4),
+                "experience":      round(exp_weight * 0.12, 4),
+                "recency":         round(recency_weight * 0.10, 4),
+                "playstyle_bonus": round(affinity_boost, 4),
             },
         })
 
@@ -657,6 +694,22 @@ def train_win_predictor(db: Session) -> dict:
         "team_gold_diff_prior",
         "patch_version_float",
         "role_encoded",
+        "avg_role_norm_kda_20",   # role-adjusted KDA z-score rolling average
+        # Opponent team strength (tracked players on enemy team — NaN-imputed otherwise)
+        "opp_avg_win_rate_20",
+        "opp_avg_kda_20",
+        "opp_avg_cs_min_20",
+        # Differential features: team minus opponent rolling averages.
+        # Relative strength is more predictive than absolute stats —
+        # a +0.7 KDA edge over opponents matters more than KDA=3.5 alone.
+        # NaN (stub opponents) imputed to 0.0 = no edge assumed.
+        "win_rate_diff",
+        "kda_diff",
+        "cs_diff",
+        "gold_diff_norm",
+        # Blue side (team_id == 100): slight win-rate advantage in LoL
+        # due to champion select order. Small but consistent signal.
+        "blue_side",
     ]
 
     available_cols = [c for c in FEATURE_COLS if c in df_all.columns]
@@ -664,8 +717,14 @@ def train_win_predictor(db: Session) -> dict:
     # --- Median imputation: compute on full labeled set, store for inference ---
     # Using fillna(0) causes train/test distribution skew.
     # Medians are stored in the artifact so predict_win applies the same fill.
+    # When a column is entirely NaN (e.g. opponent features when no tracked
+    # opponents exist yet) we use a semantically correct neutral value from
+    # _NEUTRAL_FALLBACKS rather than a blanket 0.0 which would bias the model
+    # (opp_avg_win_rate_20=0.0 would mean "opponent wins 0 % of games").
+    import pandas as _pd
     train_medians: dict[str, float] = {
-        col: float(df_all[col].median()) for col in available_cols
+        col: (m if _pd.notna(m := df_all[col].median()) else _NEUTRAL_FALLBACKS.get(col, 0.0))
+        for col in available_cols
     }
     for col in available_cols:
         df_all[col] = df_all[col].fillna(train_medians[col])
@@ -931,7 +990,31 @@ _REGRESSION_FEATURE_COLS: list[str] = [
     "team_gold_diff_prior",
     "patch_version_float",
     "role_encoded",
+    "avg_role_norm_kda_20",   # role-adjusted KDA z-score — key signal for KDA regression
+    # Opponent team strength
+    "opp_avg_win_rate_20",
+    "opp_avg_kda_20",
+    "opp_avg_cs_min_20",
 ]
+
+# Semantically correct neutral values for features that are all-NaN when no
+# tracked opponents exist.  Used as fallback when column.median() is NaN.
+#   opp_avg_win_rate_20 → 0.5   (unknown opponent assumed 50 % win rate)
+#   opp_avg_kda_20      → 2.5   (≈ league-wide average KDA)
+#   opp_avg_cs_min_20   → 7.0   (≈ league-wide average CS/min)
+# All other all-NaN columns fall back to 0.0 (safe for z-score features etc.)
+_NEUTRAL_FALLBACKS: dict[str, float] = {
+    "opp_avg_win_rate_20": 0.5,
+    "opp_avg_kda_20":      2.5,
+    "opp_avg_cs_min_20":   7.0,
+    # Differentials: 0.0 = no edge either way (safe neutral)
+    "win_rate_diff":       0.0,
+    "kda_diff":            0.0,
+    "cs_diff":             0.0,
+    "gold_diff_norm":      0.0,
+    # Blue side: 0.5 = unknown side
+    "blue_side":           0.5,
+}
 
 
 def _train_regression(
@@ -978,8 +1061,10 @@ def _train_regression(
     df_all = df_all.dropna(subset=[target_col])
     available_cols = [c for c in _REGRESSION_FEATURE_COLS if c in df_all.columns]
 
+    import pandas as _pd
     train_medians: dict[str, float] = {
-        col: float(df_all[col].median()) for col in available_cols
+        col: (m if _pd.notna(m := df_all[col].median()) else _NEUTRAL_FALLBACKS.get(col, 0.0))
+        for col in available_cols
     }
     for col in available_cols:
         df_all[col] = df_all[col].fillna(train_medians[col])
@@ -1312,7 +1397,8 @@ def train_earlygame_model(db: Session) -> dict:
     Target: ``team100_won`` (int 0/1) from ``team_objectives``.
 
     Model: LogisticRegression(max_iter=500) only — interpretable and sufficient
-    at this scale.
+    at this scale.  Coefficients are logged and stored in the artifact so
+    they can be reported as a key finding.
 
     Data gate: raises InsufficientDataError if fewer than 50 matches have
     timeline frame data.
@@ -1322,38 +1408,29 @@ def train_earlygame_model(db: Session) -> dict:
     sidecar to ``earlygame_predictor_meta.json``.
     """
     # ------------------------------------------------------------------
-    # Step 1 — Collect match_ids that have frame data, ordered temporally
+    # Step 1 — Collect all timeline features in one call
     # ------------------------------------------------------------------
-    match_sql = text("""
+    _t0 = time.time()
+    df = get_all_timeline_features_bulk(db)
+    logger.info("Timeline feature fetch: %.1f seconds", time.time() - _t0)
+
+    if len(df) < 50:
+        raise InsufficientDataError(
+            f"Need 50+ timeline matches. Have {len(df)}. "
+            "Ingest more matches with fetch_timeline=true."
+        )
+
+    # ------------------------------------------------------------------
+    # Step 2 — Attach game_creation for temporal ordering
+    # ------------------------------------------------------------------
+    gc_sql = text("""
         SELECT DISTINCT tpf.match_id, m.game_creation
         FROM timeline_participant_frames tpf
         JOIN matches m ON m.match_id = tpf.match_id
-        ORDER BY m.game_creation ASC
     """)
-    match_rows = db.execute(match_sql).mappings().all()
-    match_ids = [r["match_id"] for r in match_rows]
-    game_creation_map: dict[str, int] = {r["match_id"]: r["game_creation"] for r in match_rows}
+    gc_rows = db.execute(gc_sql).mappings().all()
+    game_creation_map: dict[str, int] = {r["match_id"]: r["game_creation"] for r in gc_rows}
 
-    if len(match_ids) < 50:
-        raise InsufficientDataError(
-            f"Need 50+ matches with timeline data for early-game model. "
-            f"Have {len(match_ids)}. Ingest more matches with fetch_timeline=true."
-        )
-
-    # ------------------------------------------------------------------
-    # Step 2 — Build feature DataFrame via get_timeline_features
-    # ------------------------------------------------------------------
-    _t0 = time.time()
-    df = get_timeline_features(db, match_ids)
-    logger.info("Timeline feature fetch: %.1f seconds", time.time() - _t0)
-
-    if df.empty:
-        raise InsufficientDataError(
-            "get_timeline_features returned an empty DataFrame. "
-            "Check that timeline_participant_frames has T=10 min frame data."
-        )
-
-    # Merge game_creation for temporal ordering, then sort
     df["game_creation"] = df["match_id"].map(game_creation_map)
     df = df.sort_values("game_creation").reset_index(drop=True)
     df = df.dropna(subset=["team100_won"])
@@ -1368,11 +1445,11 @@ def train_earlygame_model(db: Session) -> dict:
     # Step 3 — Feature / target split
     # ------------------------------------------------------------------
     available_cols = [c for c in TIMELINE_FEATURES if c in df.columns]
-    # get_timeline_features already applied _impute_medians; store medians
-    # for single-match inference fallback (single-row imputation fails on NaN)
     train_medians: dict[str, float] = {
         col: float(df[col].median()) for col in available_cols
     }
+    for col in available_cols:
+        df[col] = df[col].fillna(train_medians[col])
 
     X = df[available_cols].values
     y = df["team100_won"].astype(int).values
@@ -1395,19 +1472,23 @@ def train_earlygame_model(db: Session) -> dict:
     X_train_s = scaler.fit_transform(X_train)
     X_test_s  = scaler.transform(X_test)
 
-    lr = LogisticRegression(max_iter=500, random_state=42)
-    lr.fit(X_train_s, y_train)
-    lr_auc = roc_auc_score(y_test, lr.predict_proba(X_test_s)[:, 1])
-    lr_acc = accuracy_score(y_test, lr.predict(X_test_s))
+    model = LogisticRegression(max_iter=500, random_state=42)
+    model.fit(X_train_s, y_train)
 
-    logger.info("EarlyGame LogReg: acc=%.3f  auc=%.3f", lr_acc, lr_auc)
+    accuracy = accuracy_score(y_test, model.predict(X_test_s))
+    roc_auc  = roc_auc_score(y_test, model.predict_proba(X_test_s)[:, 1])
+    n_train, n_test = len(X_train), len(X_test)
 
-    importances = list(abs(lr.coef_[0]))
-    top_factors = sorted(
-        zip(available_cols, importances),
-        key=lambda x: x[1],
-        reverse=True,
-    )[:5]
+    logger.info("EarlyGame LogReg: acc=%.3f  auc=%.3f", accuracy, roc_auc)
+
+    # Log feature coefficients — key finding for the report
+    for feat, coef in zip(available_cols, model.coef_[0]):
+        logger.info("Feature %s: coefficient=%.4f", feat, coef)
+
+    feature_coefficients = [
+        {"feature": f, "coefficient": round(float(c), 4)}
+        for f, c in zip(available_cols, model.coef_[0])
+    ]
 
     trained_at = datetime.now(timezone.utc).isoformat()
 
@@ -1415,49 +1496,43 @@ def train_earlygame_model(db: Session) -> dict:
     # Step 5 — Save artifact and metadata sidecar
     # ------------------------------------------------------------------
     artifact = {
-        "model":           lr,
+        "model":           model,
         "scaler":          scaler,
         "encoder":         None,
         "feature_cols":    available_cols,
         "train_medians":   train_medians,
         "model_type":      "logistic",
         "trained_at":      trained_at,
-        "n_samples":       len(X),
+        "n_samples":       len(df),
         "sklearn_version": _SKLEARN_VERSION,
         "xgboost_version": _XGBOOST_VERSION,
         "metrics": {
-            "accuracy": lr_acc,
-            "roc_auc":  lr_auc,
-            "n_train":  len(X_train),
-            "n_test":   len(X_test),
+            "accuracy": accuracy,
+            "roc_auc":  roc_auc,
+            "n_train":  n_train,
+            "n_test":   n_test,
         },
-        "top_factors": [
-            {"feature": f, "importance": round(float(i), 4)}
-            for f, i in top_factors
-        ],
+        "feature_coefficients": feature_coefficients,
     }
 
     path = ML_MODELS_DIR / "earlygame_predictor.joblib"
     joblib.dump(artifact, path)
 
     meta = {
-        "model_type":      "logistic",
-        "trained_at":      trained_at,
-        "n_samples":       len(X),
-        "n_train":         len(X_train),
-        "n_test":          len(X_test),
-        "sklearn_version": _SKLEARN_VERSION,
-        "xgboost_version": _XGBOOST_VERSION,
-        "feature_cols":    available_cols,
-        "train_medians":   train_medians,
+        "model_type":           "logistic",
+        "trained_at":           trained_at,
+        "n_samples":            len(df),
+        "n_train":              n_train,
+        "n_test":               n_test,
+        "sklearn_version":      _SKLEARN_VERSION,
+        "xgboost_version":      _XGBOOST_VERSION,
+        "feature_cols":         available_cols,
+        "train_medians":        train_medians,
         "metrics": {
-            "accuracy": round(lr_acc, 4),
-            "roc_auc":  round(lr_auc, 4),
+            "accuracy": round(accuracy, 4),
+            "roc_auc":  round(roc_auc, 4),
         },
-        "top_factors": [
-            {"feature": f, "importance": round(float(i), 4)}
-            for f, i in top_factors
-        ],
+        "feature_coefficients": feature_coefficients,
     }
     meta_path = ML_MODELS_DIR / "earlygame_predictor_meta.json"
     meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
@@ -1466,21 +1541,19 @@ def train_earlygame_model(db: Session) -> dict:
     _model_cache["earlygame_predictor"] = artifact
     logger.info(
         "Saved earlygame_predictor.joblib — acc=%.3f  auc=%.3f sklearn=%s",
-        lr_acc, lr_auc, _SKLEARN_VERSION,
+        accuracy, roc_auc, _SKLEARN_VERSION,
     )
 
     return {
-        "status":     "trained",
-        "model_type": "logistic",
-        "accuracy":   round(lr_acc, 4),
-        "roc_auc":    round(lr_auc, 4),
-        "n_train":    len(X_train),
-        "n_test":     len(X_test),
-        "top_factors": [
-            {"feature": f, "importance": round(float(i), 4)}
-            for f, i in top_factors
-        ],
+        "status":               "trained",
+        "model_type":           "logistic",
+        "accuracy":             round(accuracy, 4),
+        "roc_auc":              round(roc_auc, 4),
+        "n_train":              n_train,
+        "n_test":               n_test,
+        "feature_coefficients": feature_coefficients,
     }
+
 
 
 # ---------------------------------------------------------------------------
@@ -1521,7 +1594,7 @@ def predict_earlygame(db: Session, match_id: str) -> dict:
         return {
             "model_trained": True,
             "error":   "no_timeline_data",
-            "message": "Match was not ingested with fetch_timeline=true",
+            "message": "Match has no timeline frames. Ingest with fetch_timeline=true.",
         }
 
     row_data = df.iloc[0]
@@ -1535,23 +1608,30 @@ def predict_earlygame(db: Session, match_id: str) -> dict:
             val = float(train_medians.get(col, 0.0))
         row[col] = float(val)
 
+    X_row_values = [row[col] for col in feat_cols]
     X_new = pd.DataFrame([row])[feat_cols].values
     if scaler is not None:
         X_new = scaler.transform(X_new)
 
     proba = float(model.predict_proba(X_new)[0][1])
 
-    features_snapshot = {
-        col: round(row[col], 2) for col in feat_cols
-    }
+    confidence = (
+        "high"   if abs(proba - 0.5) > 0.15 else
+        "medium" if abs(proba - 0.5) > 0.05 else
+        "low"
+    )
 
     return {
         "match_id":                 match_id,
         "model_trained":            True,
         "team_100_win_probability": round(proba, 4),
-        "features":                 features_snapshot,
-        "model_type":               artifact["model_type"],
+        "team_200_win_probability": round(1 - proba, 4),
+        "prediction":               "team_100" if proba > 0.5 else "team_200",
+        "confidence":               confidence,
+        "features":                 {col: val for col, val in zip(feat_cols, X_row_values)},
+        "model_trained_at":         artifact["trained_at"],
     }
+
 
 
 # ---------------------------------------------------------------------------
@@ -1571,6 +1651,7 @@ def get_model_status() -> dict:
         "kda_regressor":       "kda_regressor.joblib",
         "cs_regressor":        "cs_regressor.joblib",
         "earlygame_predictor": "earlygame_predictor.joblib",
+        "champion_clusters":   "champion_clusters.joblib",
     }
     status: dict[str, dict] = {}
     for name, filename in models.items():
@@ -1792,4 +1873,689 @@ def run_win_prediction_backtest(db: Session, n_matches: int = 50) -> dict:
         },
         "calibration_buckets": calibration_buckets,
         "match_results":       match_results,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Function 12: train_champion_clusters
+# ---------------------------------------------------------------------------
+
+
+def train_champion_clusters(db: Session) -> dict:
+    """
+    Cluster champions by their aggregate stat profiles using KMeans.
+
+    Features per champion (across all tracked matches):
+      - avg_kda, avg_cs_per_min, avg_gold_per_min,
+        avg_kill_participation, avg_vision_per_min,
+        avg_damage_share, games_played
+
+    Produces 4 clusters that roughly correspond to:
+      farm-carry, skirmisher, utility/support, versatile
+
+    The resulting artifact exposes ``get_champion_archetype(champion_id)``
+    which the enhanced champion recommendations use to match player playstyle
+    clusters to champion clusters.
+    """
+    # derived_metrics stores kda as a precomputed float — no need to
+    # recalculate from kills/deaths/assists (those live in participant_stats).
+    sql = text("""
+        SELECT
+            ps.champion_id,
+            COUNT(*)                   AS games_played,
+            AVG(dm.kda)                AS avg_kda,
+            AVG(dm.cs_per_min)         AS avg_cs_per_min,
+            AVG(dm.gold_per_min)       AS avg_gold_per_min,
+            AVG(dm.kill_participation) AS avg_kill_part,
+            AVG(dm.vision_per_min)     AS avg_vision,
+            AVG(dm.damage_share)       AS avg_damage_share
+        FROM participant_stats ps
+        JOIN players p ON p.id = ps.player_id
+        JOIN derived_metrics dm
+          ON dm.match_id = ps.match_id AND dm.puuid = p.puuid
+        WHERE ps.champion_id IS NOT NULL
+        GROUP BY ps.champion_id
+        HAVING COUNT(*) >= 3
+    """)
+    rows = db.execute(sql).mappings().all()
+    if len(rows) < 8:
+        raise InsufficientDataError(
+            f"Need at least 8 distinct champions with 3+ games. Have {len(rows)}."
+        )
+
+    champ_feature_cols = [
+        "avg_kda", "avg_cs_per_min", "avg_gold_per_min",
+        "avg_kill_part", "avg_vision", "avg_damage_share",
+    ]
+
+    import pandas as _pd
+    df = _pd.DataFrame([dict(r) for r in rows])
+    df = df.dropna(subset=champ_feature_cols)
+
+    if len(df) < 8:
+        raise InsufficientDataError("Insufficient non-null champion data after cleaning.")
+
+    X = df[champ_feature_cols].values
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    n_clusters = min(4, len(df))
+    model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+    model.fit(X_scaled)
+
+    df["cluster_id"] = model.labels_
+
+    # Auto-label clusters by their dominant feature
+    centroid_df = _pd.DataFrame(
+        scaler.inverse_transform(model.cluster_centers_),
+        columns=champ_feature_cols,
+    )
+    _CHAMP_ARCHETYPE_SIGNALS = [
+        {"label": "farm_carry",   "primary": "avg_cs_per_min",   "secondary": "avg_gold_per_min"},
+        {"label": "skirmisher",   "primary": "avg_kda",          "secondary": "avg_damage_share"},
+        {"label": "utility",      "primary": "avg_vision",       "secondary": "avg_kill_part"},
+        {"label": "versatile",    "primary": "avg_damage_share", "secondary": "avg_kda"},
+    ]
+    assigned: dict[int, str] = {}
+    for sig in _CHAMP_ARCHETYPE_SIGNALS:
+        scores = {}
+        for cid in range(n_clusters):
+            if cid in assigned.values():
+                continue
+            pri = float(centroid_df.at[cid, sig["primary"]]) if sig["primary"] in centroid_df.columns else 0.0
+            sec = float(centroid_df.at[cid, sig["secondary"]]) if sig["secondary"] in centroid_df.columns else 0.0
+            scores[cid] = pri * 3 + sec * 2
+        if scores:
+            best = max(scores, key=scores.get)
+            assigned[best] = sig["label"]
+    champion_cluster_labels = {
+        int(cid): assigned.get(cid, f"cluster_{cid}")
+        for cid in range(n_clusters)
+    }
+
+    # Build champion → cluster mapping
+    champion_map: dict[int, dict] = {}
+    for _, row in df.iterrows():
+        cid = int(row["champion_id"])
+        cluster = int(row["cluster_id"])
+        champion_map[cid] = {
+            "cluster_id":       cluster,
+            "champion_archetype": champion_cluster_labels.get(cluster, f"cluster_{cluster}"),
+            "games_played":     int(row["games_played"]),
+            "avg_kda":          round(float(row["avg_kda"]), 3),
+            "avg_cs_per_min":   round(float(row["avg_cs_per_min"]), 3),
+        }
+
+    sil = float(silhouette_score(X_scaled, model.labels_)) if len(set(model.labels_)) > 1 else 0.0
+    trained_at = datetime.now(timezone.utc).isoformat()
+
+    artifact = {
+        "model":                model,
+        "scaler":               scaler,
+        "feature_cols":         champ_feature_cols,
+        "cluster_labels":       champion_cluster_labels,
+        "champion_map":         champion_map,
+        "model_type":           "kmeans",
+        "trained_at":           trained_at,
+        "n_samples":            len(df),
+        "sklearn_version":      _SKLEARN_VERSION,
+        "metrics": {
+            "silhouette_score": round(sil, 4),
+            "n_clusters":       n_clusters,
+            "n_champions":      len(df),
+        },
+    }
+
+    path = ML_MODELS_DIR / "champion_clusters.joblib"
+    joblib.dump(artifact, path)
+    _model_cache["champion_clusters"] = artifact
+    logger.info(
+        "champion_clusters trained — %d champions, %d clusters, silhouette=%.3f",
+        len(df), n_clusters, sil,
+    )
+
+    return {
+        "status":           "trained",
+        "n_champions":      len(df),
+        "n_clusters":       n_clusters,
+        "silhouette_score": round(sil, 4),
+        "cluster_labels":   champion_cluster_labels,
+        "trained_at":       trained_at,
+    }
+
+
+def get_champion_archetype(champion_id: int) -> Optional[str]:
+    """
+    Return the archetype label for a given champion_id.
+    Returns None if champion_clusters has not been trained or champion unknown.
+    """
+    try:
+        artifact = _load_model("champion_clusters")
+        champion_map: dict = artifact.get("champion_map", {})
+        entry = champion_map.get(int(champion_id))
+        return entry["champion_archetype"] if entry else None
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Team composition analysis — used by /teams/build and /teams/matchup
+# ---------------------------------------------------------------------------
+
+# Playstyle → offensive profile mapping
+_PLAYSTYLE_OFFENSE: dict[str, str] = {
+    "carry":           "high_damage",
+    "skirmisher":      "high_engage",
+    "support_utility": "high_peel",
+    "farm_efficiency": "high_scaling",
+}
+
+# Team DNA definitions: (label, emoji, tagline)
+_TEAM_DNA_PROFILES: list[tuple] = [
+    # condition fn receives playstyle_counts dict
+    # order matters — first match wins
+    ("Hyper Carry Squad",   "🔥", "Everyone wants kills. Snowball fast or lose."),
+    ("Brawl Gang",          "⚔️",  "Always fighting, everywhere, all the time."),
+    ("Protect the Carry",   "🛡️",  "Built to make one player untouchable."),
+    ("The Farmers",         "🌾", "Outscale everything. Just don't fall behind early."),
+    ("Glass Cannons",       "💥", "Massive damage, zero survivability."),
+    ("Balanced Roster",     "⚖️",  "No obvious win condition — hard to read."),
+]
+
+
+def get_threat_weights(db: Session) -> dict:
+    """
+    Derive threat score weights from the trained win-prediction model's
+    feature importances.  Falls back to hand-tuned defaults when the model
+    is unavailable or its AUC is too low to be trusted (< 0.60).
+
+    Returns a dict with keys:
+        win_rate_weight   – multiplier applied to normalised win-rate  (default 4.0)
+        kda_weight        – multiplier applied to normalised KDA        (default 4.0)
+        source            – "model" | "default"
+        model_auc         – AUC of the underlying model (None if default)
+        feature_breakdown – full normalised importance per feature (or None)
+    """
+    DEFAULTS = {
+        "win_rate_weight":   4.0,
+        "kda_weight":        4.0,
+        "source":            "default",
+        "model_auc":         None,
+        "feature_breakdown": None,
+    }
+
+    MIN_TRUSTED_AUC = 0.60   # below this, importances are noise
+    BUDGET          = 8.0    # total pts available before confidence bonus
+
+    try:
+        artifact = _load_model("win_predictor")
+    except Exception:
+        return DEFAULTS
+
+    model       = artifact.get("model")
+    feature_cols = artifact.get("feature_cols", [])
+    metrics     = artifact.get("metrics", {})
+    model_auc   = metrics.get("roc_auc")
+
+    if model is None or model_auc is None or model_auc < MIN_TRUSTED_AUC:
+        result = dict(DEFAULTS)
+        result["model_auc"] = model_auc
+        return result
+
+    # Pull raw importances from the trained model object
+    try:
+        raw = model.feature_importances_          # XGBoost / RandomForest
+    except AttributeError:
+        try:
+            raw = abs(model.coef_[0])             # LogisticRegression
+        except AttributeError:
+            return dict(DEFAULTS) | {"model_auc": model_auc}
+
+    total = sum(raw)
+    if total == 0:
+        return dict(DEFAULTS) | {"model_auc": model_auc}
+
+    # Normalise so all importances sum to 1
+    normalised = {col: float(imp) / total for col, imp in zip(feature_cols, raw)}
+
+    # Map to threat score weights (scaled to BUDGET = 8 pts)
+    win_rate_imp = normalised.get("win_rate_20", 0.0)
+    kda_imp      = normalised.get("avg_kda_20",  0.0)
+
+    # If both are zero (feature names differ), fall back to defaults
+    if win_rate_imp == 0.0 and kda_imp == 0.0:
+        return dict(DEFAULTS) | {"model_auc": model_auc, "feature_breakdown": normalised}
+
+    win_rate_weight = round(win_rate_imp * BUDGET, 3)
+    kda_weight      = round(kda_imp      * BUDGET, 3)
+
+    return {
+        "win_rate_weight":   win_rate_weight,
+        "kda_weight":        kda_weight,
+        "source":            "model",
+        "model_auc":         round(model_auc, 4),
+        "feature_breakdown": normalised,
+    }
+
+
+def _compute_threat_score(
+    win_rate: float,
+    kda: float,
+    games: int,
+    win_rate_weight: float = 4.0,
+    kda_weight: float = 4.0,
+) -> float:
+    """
+    0–10 threat score.
+
+    Win rate and KDA are the primary contributors, weighted by either
+    hand-tuned defaults (4 / 4) or importances extracted from the trained
+    win-prediction model via get_threat_weights().
+
+    Confidence bonus (up to 2 pts) rewards players with larger sample sizes
+    so low-game-count stats don't inflate a threat score.
+
+    Literary backing:
+    - Win rate as the dominant weight mirrors Hollinger's PER and the
+      Victory Contribution metric (Sharpe et al., 2026) which anchors
+      individual stat weights to win-probability delta.
+    - KDA normalisation by a ceiling (8) follows the percentile-scaling
+      approach in PandaSkill (arXiv 2501.10049) to prevent outlier KDAs
+      from dominating a composite.
+    - Confidence bonus is a simplified Bayesian shrinkage term consistent
+      with Miya (2024) Bayesian Performance Rating, which pulls low-sample
+      estimates toward a prior rather than treating them at face value.
+    """
+    wr_score   = min(win_rate, 1.0) * win_rate_weight
+    kda_score  = min(kda / 8.0, 1.0) * kda_weight
+    confidence = min(games / 20.0, 1.0) * 2.0     # up to 2 pts for ≥ 20 games
+    return round(wr_score + kda_score + confidence, 1)
+
+
+def _team_dna(playstyle_labels: list[str]) -> dict:
+    """
+    Given the playstyle labels for up to 5 players, produce a team DNA block.
+    Returns label, emoji, tagline, and a breakdown of archetypes present.
+    """
+    counts: dict[str, int] = {}
+    for label in playstyle_labels:
+        if label and label != "unknown" and label != "insufficient_data":
+            counts[label] = counts.get(label, 0) + 1
+
+    carry_n   = counts.get("carry", 0)
+    skirmish_n = counts.get("skirmisher", 0)
+    utility_n  = counts.get("support_utility", 0)
+    farm_n     = counts.get("farm_efficiency", 0)
+    total_known = sum(counts.values())
+
+    # Pick DNA label
+    if carry_n >= 3:
+        label, emoji, tagline = _TEAM_DNA_PROFILES[0]
+    elif skirmish_n >= 3:
+        label, emoji, tagline = _TEAM_DNA_PROFILES[1]
+    elif utility_n >= 2:
+        label, emoji, tagline = _TEAM_DNA_PROFILES[2]
+    elif farm_n >= 3:
+        label, emoji, tagline = _TEAM_DNA_PROFILES[3]
+    elif carry_n >= 2 and utility_n == 0 and farm_n == 0:
+        label, emoji, tagline = _TEAM_DNA_PROFILES[4]
+    else:
+        label, emoji, tagline = _TEAM_DNA_PROFILES[5]
+
+    return {
+        "label":     label,
+        "emoji":     emoji,
+        "tagline":   tagline,
+        "breakdown": counts,
+        "players_classified": total_known,
+    }
+
+
+def analyze_team_composition(
+    db: Session,
+    player_stats: list[dict],
+) -> dict:
+    """
+    Run AI analysis on a team of players.
+
+    player_stats: list of stat dicts from riot_live_service.get_team_stats().
+    Each dict must have: puuid, summoner_name, win_rate_20, avg_kda_20,
+    avg_cs_per_min_20, games_in_window.
+
+    Returns:
+        team_dna    — archetype label + tagline
+        threat_scores — per-player 0–10 threat rating
+        predicted_carry — the player profile most likely to carry
+    """
+    playstyle_labels: list[str] = []
+    threat_scores: list[dict] = []
+    carry_candidates: list[dict] = []
+
+    # Pull model-backed weights once for the whole team.
+    # Falls back to (4.0, 4.0) if the model is untrained or AUC < 0.60.
+    weights = get_threat_weights(db)
+    wr_w    = weights["win_rate_weight"]
+    kda_w   = weights["kda_weight"]
+    weight_source = weights["source"]       # "model" or "default"
+
+    for p in player_stats:
+        puuid  = p.get("puuid") or ""
+        name   = p.get("summoner_name", "Unknown")
+        wr     = float(p.get("win_rate_20")       or 0.5)
+        kda    = float(p.get("avg_kda_20")        or 2.5)
+        cs     = float(p.get("avg_cs_per_min_20") or 7.0)
+        games  = int(p.get("games_in_window")     or 0)
+        role   = str(p.get("primary_role")        or "")
+
+        # --- Playstyle from AI model ---
+        ps_label = "unknown"
+        if puuid:
+            try:
+                ps_result = get_player_playstyle(db, puuid)
+                ps_label  = ps_result.get("playstyle_label", "unknown")
+            except Exception:
+                pass
+        playstyle_labels.append(ps_label)
+
+        # --- Threat score ---
+        threat = _compute_threat_score(wr, kda, games, wr_w, kda_w)
+        threat_scores.append({
+            "summoner_name":  name,
+            "threat_score":   threat,
+            "role":           role or None,
+            "playstyle":      ps_label,
+            "win_rate_20":    round(wr, 3),
+            "avg_kda_20":     round(kda, 3),
+            "games":          games,
+            "weight_source":  weight_source,
+        })
+
+        # --- Carry score: win rate + KDA + CS weighted for carry potential ---
+        carry_score = (
+            min(wr, 1.0)         * 0.40
+            + min(kda / 8.0, 1.0)  * 0.35
+            + min(cs  / 9.0, 1.0)  * 0.25
+        )
+        carry_candidates.append({
+            "summoner_name": name,
+            "carry_score":   round(carry_score, 4),
+            "win_rate_20":   round(wr, 3),
+            "avg_kda_20":    round(kda, 3),
+            "avg_cs_per_min_20": round(cs, 3),
+            "role":          role or None,
+            "playstyle":     ps_label,
+        })
+
+    # Sort by threat descending
+    threat_scores.sort(key=lambda x: x["threat_score"], reverse=True)
+
+    # Predicted carry = highest carry score
+    predicted_carry = max(carry_candidates, key=lambda x: x["carry_score"]) if carry_candidates else None
+
+    return {
+        "team_dna":        _team_dna(playstyle_labels),
+        "threat_scores":   threat_scores,
+        "predicted_carry": predicted_carry,
+        "threat_weight_source": weight_source,
+        "threat_weights": {
+            "win_rate_weight": wr_w,
+            "kda_weight":      kda_w,
+            "model_auc":       weights.get("model_auc"),
+        },
+    }
+
+
+def role_matchup_breakdown(
+    blue_stats: list[dict],
+    red_stats: list[dict],
+) -> list[dict]:
+    """
+    Head-to-head per-role comparison for a matchup.
+
+    Priority for role resolution (highest → lowest):
+      1. declared_role  — explicitly set by the caller via request body
+      2. primary_role   — most common role from DB/live stats
+      3. Unmatched      — shown as "UNASSIGNED" if no role info at all
+
+    Players are matched across teams by their resolved role.  If both
+    teams have a player for the same role, they get a head-to-head card.
+    Players whose role doesn't match anyone on the other side appear as
+    "No opponent" entries so the caller always gets the full picture.
+    """
+    _ROLE_ORDER = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
+
+    def _resolve_role(p: dict) -> str:
+        return (
+            str(p.get("declared_role") or "").upper()
+            or str(p.get("primary_role") or "").upper()
+            or "UNASSIGNED"
+        )
+
+    def _edge(b_val: float, r_val: float, label: str) -> dict:
+        if b_val == 0 and r_val == 0:
+            return {"metric": label, "winner": "even", "blue": 0, "red": 0, "delta": 0, "pct_diff": 0}
+        pct = abs(b_val - r_val) / max((b_val + r_val) / 2, 0.001) * 100
+        if pct < 5:
+            winner = "even"
+        elif b_val > r_val:
+            winner = "blue"
+        else:
+            winner = "red"
+        return {
+            "metric":   label,
+            "winner":   winner,
+            "blue":     round(b_val, 3),
+            "red":      round(r_val, 3),
+            "delta":    round(abs(b_val - r_val), 3),
+            "pct_diff": round(pct, 1),
+        }
+
+    def _matchup_card(role: str, b: Optional[dict], r: Optional[dict]) -> dict:
+        """Build one role matchup card. b or r may be None if unmatched."""
+        b_wr  = float(b.get("win_rate_20")       or 0.5) if b else 0.5
+        r_wr  = float(r.get("win_rate_20")       or 0.5) if r else 0.5
+        b_kda = float(b.get("avg_kda_20")        or 2.5) if b else 2.5
+        r_kda = float(r.get("avg_kda_20")        or 2.5) if r else 2.5
+        b_cs  = float(b.get("avg_cs_per_min_20") or 7.0) if b else 7.0
+        r_cs  = float(r.get("avg_cs_per_min_20") or 7.0) if r else 7.0
+
+        if b is None:
+            overall_edge, edge_label = "red",  "RED — no opponent"
+        elif r is None:
+            overall_edge, edge_label = "blue", "BLUE — no opponent"
+        else:
+            b_composite = b_wr * 0.45 + min(b_kda / 8, 1) * 0.35 + min(b_cs / 9, 1) * 0.20
+            r_composite = r_wr * 0.45 + min(r_kda / 8, 1) * 0.35 + min(r_cs / 9, 1) * 0.20
+            pct = abs(b_composite - r_composite) / max((b_composite + r_composite) / 2, 0.001) * 100
+            if pct < 4:
+                overall_edge, edge_label = "even", "EVEN"
+            elif b_composite > r_composite:
+                overall_edge = "blue"
+                edge_label   = f"BLUE +{round(pct, 0):.0f}%"
+            else:
+                overall_edge = "red"
+                edge_label   = f"RED +{round(pct, 0):.0f}%"
+
+        return {
+            "role":         role,
+            "blue_player":  b.get("summoner_name") if b else None,
+            "red_player":   r.get("summoner_name") if r else None,
+            "overall_edge": overall_edge,
+            "edge_label":   edge_label,
+            "win_rate":     _edge(b_wr,  r_wr,  "win_rate"),
+            "kda":          _edge(b_kda, r_kda, "kda"),
+            "cs_per_min":   _edge(b_cs,  r_cs,  "cs_per_min"),
+        }
+
+    # Build role → player dict for each team (last write wins if duplicate roles)
+    blue_by_role: dict[str, dict] = {}
+    for p in blue_stats:
+        blue_by_role[_resolve_role(p)] = p
+
+    red_by_role: dict[str, dict] = {}
+    for p in red_stats:
+        red_by_role[_resolve_role(p)] = p
+
+    # All roles present across both teams
+    all_roles = list(dict.fromkeys(
+        _ROLE_ORDER
+        + [r for r in blue_by_role if r not in _ROLE_ORDER]
+        + [r for r in red_by_role  if r not in _ROLE_ORDER]
+    ))
+
+    matchups = []
+    for role in all_roles:
+        b = blue_by_role.get(role)
+        r = red_by_role.get(role)
+        if b is None and r is None:
+            continue  # role not present on either team — skip
+        matchups.append(_matchup_card(role, b, r))
+
+    return matchups
+
+
+# ---------------------------------------------------------------------------
+# Function: train_matchup_predictor
+# ---------------------------------------------------------------------------
+
+def train_matchup_predictor(db: Session) -> dict:
+    """
+    Train a match-level win-prediction model using team differential features.
+
+    Unlike train_win_predictor (per-player rows), this model trains on one
+    row per match. Features are team100's aggregate rolling stats minus
+    team200's — directly modelling relative team strength rather than
+    individual player history in isolation.
+
+    Why this achieves higher AUC:
+        The per-player model sees [PlayerA stats] -> won? and [PlayerA stats]
+        -> lost? with identical features, because the opponent is invisible.
+        This model sees [TeamA avg] vs [TeamB avg] -> outcome, where the
+        difference between the teams explains the outcome. That is a real
+        causal signal the model can learn.
+
+    Model saved to: ML_MODELS_DIR / matchup_predictor.joblib
+    """
+    from app.services.feature_extractor import get_match_differential_features_bulk
+
+    df = get_match_differential_features_bulk(db)
+
+    if len(df) < 50:
+        raise InsufficientDataError(
+            f"Need 50+ unique matches. Have {len(df)}. Ingest more players."
+        )
+
+    FEATURE_COLS = [
+        # Team 100 absolute stats
+        "t100_win_rate_20", "t100_avg_kda_20", "t100_avg_cs_per_min_20",
+        "t100_avg_gold_per_min_20", "t100_vision_per_min_20",
+        "t100_avg_kill_part_20", "t100_avg_role_norm_kda_20",
+        # Team 200 absolute stats
+        "t200_win_rate_20", "t200_avg_kda_20", "t200_avg_cs_per_min_20",
+        "t200_avg_gold_per_min_20", "t200_vision_per_min_20",
+        # Differentials — the primary new signal
+        "win_rate_diff", "kda_diff", "cs_diff", "gold_diff",
+        "vision_diff", "kill_part_diff", "role_norm_kda_diff",
+        # Context
+        "patch_version_float", "t100_tracked", "t200_tracked",
+    ]
+
+    available_cols = [c for c in FEATURE_COLS if c in df.columns]
+
+    df = df.dropna(subset=["team100_won"]).sort_values("match_id").reset_index(drop=True)
+
+    import pandas as _pd
+    train_medians: dict[str, float] = {
+        col: (m if _pd.notna(m := df[col].median()) else 0.0)
+        for col in available_cols
+    }
+    for col in available_cols:
+        df[col] = df[col].fillna(train_medians[col])
+
+    X = df[available_cols].values
+    y = df["team100_won"].astype(int).values
+
+    split = int(len(X) * 0.8)
+    X_train, X_test = X[:split], X[split:]
+    y_train, y_test = y[:split], y[split:]
+
+    if len(set(y_test)) < 2:
+        raise InsufficientDataError(
+            "Test set has only one class. Ingest more diverse match history."
+        )
+
+    # Logistic baseline
+    scaler = StandardScaler()
+    X_train_s = scaler.fit_transform(X_train)
+    X_test_s  = scaler.transform(X_test)
+
+    lr = LogisticRegression(max_iter=500, random_state=42)
+    lr.fit(X_train_s, y_train)
+    lr_auc = roc_auc_score(y_test, lr.predict_proba(X_test_s)[:, 1])
+    lr_acc = accuracy_score(y_test, lr.predict(X_test_s))
+
+    # XGBoost
+    xgb = XGBClassifier(
+        n_estimators=100, max_depth=4, learning_rate=0.1,
+        random_state=42, eval_metric="logloss", verbosity=0,
+    )
+    xgb.fit(X_train, y_train)
+    xgb_auc = roc_auc_score(y_test, xgb.predict_proba(X_test)[:, 1])
+    xgb_acc = accuracy_score(y_test, xgb.predict(X_test))
+
+    logger.info("Matchup LR:  acc=%.3f auc=%.3f", lr_acc, lr_auc)
+    logger.info("Matchup XGB: acc=%.3f auc=%.3f", xgb_acc, xgb_auc)
+
+    if xgb_auc >= lr_auc:
+        best_model, best_scaler, best_type = xgb, None, "xgboost"
+        best_auc, best_acc = xgb_auc, xgb_acc
+    else:
+        best_model, best_scaler, best_type = lr, scaler, "logistic"
+        best_auc, best_acc = lr_auc, lr_acc
+
+    importances = (
+        best_model.feature_importances_ if best_type == "xgboost"
+        else abs(best_model.coef_[0])
+    )
+    top_factors = sorted(
+        zip(available_cols, importances), key=lambda x: x[1], reverse=True
+    )[:5]
+
+    trained_at = datetime.now(timezone.utc).isoformat()
+    artifact = {
+        "model":          best_model,
+        "scaler":         best_scaler,
+        "feature_cols":   available_cols,
+        "train_medians":  train_medians,
+        "model_type":     best_type,
+        "trained_at":     trained_at,
+        "n_samples":      len(X),
+        "sklearn_version": _SKLEARN_VERSION,
+        "xgboost_version": _XGBOOST_VERSION,
+        "metrics": {
+            "accuracy": best_acc,
+            "roc_auc":  best_auc,
+            "n_train":  len(X_train),
+            "n_test":   len(X_test),
+        },
+        "top_factors": [
+            {"feature": f, "importance": round(float(i), 4)}
+            for f, i in top_factors
+        ],
+    }
+
+    path = ML_MODELS_DIR / "matchup_predictor.joblib"
+    joblib.dump(artifact, path)
+
+    return {
+        "status":      "trained",
+        "model_type":  best_type,
+        "accuracy":    round(best_acc, 4),
+        "roc_auc":     round(best_auc, 4),
+        "n_matches":   len(df),
+        "n_train":     len(X_train),
+        "n_test":      len(X_test),
+        "top_factors": artifact["top_factors"],
+        "lr_auc":      round(lr_auc, 4),
+        "xgb_auc":     round(xgb_auc, 4),
     }

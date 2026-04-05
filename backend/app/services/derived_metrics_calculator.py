@@ -61,7 +61,22 @@ def compute_derived_metrics(
     kill_participation = (kills + assists) / team_kills if team_kills > 0 else 0.0
     damage_share = total_damage / team_damage if team_damage > 0 else 0.0
 
+    # Role: prefer teamPosition (most accurate), fall back to individualPosition / role
+    role = (
+        participant.get("teamPosition")
+        or participant.get("individualPosition")
+        or participant.get("role")
+        or None
+    )
+    # Normalise to uppercase; discard non-canonical values (e.g. "Invalid", "")
+    _VALID_ROLES = {"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"}
+    if role:
+        role = role.upper().strip()
+        if role not in _VALID_ROLES:
+            role = None
+
     return {
+        "role": role,
         "kda": round(kda, 2),
         "cs_per_min": round(cs_per_min, 2),
         "gold_per_min": round(gold_per_min, 2),

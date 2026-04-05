@@ -16,11 +16,15 @@ class DerivedMetrics(Base):
         String, ForeignKey("players.puuid", ondelete="CASCADE"), nullable=False
     )
 
-    # Examples (align to what you compute)
+    # Role played in this match (TOP / JUNGLE / MIDDLE / BOTTOM / UTILITY)
+    # Sourced from participant.teamPosition at ingest time.
+    role: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+    # Core per-game metrics
     kda: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     cs_per_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     gold_per_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    kill_participation: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0-1 or 0-100, choose one
+    kill_participation: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     damage_share: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     vision_per_min: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 

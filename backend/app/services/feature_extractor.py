@@ -67,11 +67,13 @@ ROLLING_FEATURES: list[str] = [
     "avg_gold_per_min_20",
     "avg_kill_part_20",
     "win_streak",
-    # --- added: volatility & momentum ---
-    "death_rate_20",       # avg deaths/game rolling window — high value = tilting/diving
-    "vision_per_min_20",  # rolling vision density — proxy for warding habit consistency
-    "kda_std_10",         # KDA standard deviation over last 10 — measures consistency
-    "cs_trend_10",        # slope of cs/min over last 10 — positive = improving farm
+    # --- volatility & momentum ---
+    "death_rate_20",          # avg deaths/game rolling window — high value = tilting/diving
+    "vision_per_min_20",      # rolling vision density — proxy for warding habit consistency
+    "kda_std_10",             # KDA standard deviation over last 10 — measures consistency
+    "cs_trend_10",            # slope of cs/min over last 10 — positive = improving farm
+    # --- role-adjusted ---
+    "avg_role_norm_kda_20",   # KDA z-score relative to same-role players (rolling avg)
 ]
 
 TIMELINE_FEATURES: list[str] = [
@@ -930,6 +932,42 @@ def get_all_rolling_features_bulk(db: Session) -> pd.DataFrame:
     )
 
     # ------------------------------------------------------------------
+    # Step 3b — Role-normalised KDA (z-score relative to same-role players)
+    #
+    # Why: A support's KDA of 4.0 is excellent; a mid-laner's 4.0 is average.
+    # Raw avg_kda_20 conflates these, hurting the regression models.
+    # Approach: compute global mean/std KDA per role across the entire dataset,
+    # then express each game's KDA as (kda - role_mean) / role_std.
+    # The rolling average of this z-score gives avg_role_norm_kda_20.
+    #
+    # Note: role baselines use the full dataset (minor leakage on population
+    # stats, not individual outcomes — acceptable for this use case).
+    # ------------------------------------------------------------------
+    valid_roles = {"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"}
+    role_mask = df["role"].isin(valid_roles)
+
+    role_baselines = (
+        df[role_mask]
+        .groupby("role")["kda"]
+        .agg(role_avg_kda="mean", role_std_kda="std")
+    )
+    df = df.join(role_baselines, on="role")
+
+    # Normalise — players with unknown roles get 0.0 (neutral z-score)
+    df["role_norm_kda"] = (
+        (df["kda"] - df["role_avg_kda"])
+        / df["role_std_kda"].replace(0.0, np.nan)
+    ).fillna(0.0)
+
+    # Fresh groupby required — grouped was created before role_norm_kda existed
+    df["avg_role_norm_kda_20"] = df.groupby("puuid")["role_norm_kda"].transform(
+        lambda x: x.shift(1).rolling(20, min_periods=5).mean()
+    ).fillna(0.0)
+
+    # Drop intermediate columns used only for the normalisation step
+    df = df.drop(columns=["role_avg_kda", "role_std_kda", "role_norm_kda"], errors="ignore")
+
+    # ------------------------------------------------------------------
     # Step 4 — Win streak (strictly prior games, most-recent-first)
     # ------------------------------------------------------------------
     df = _add_win_streak_column(df)
@@ -990,5 +1028,188 @@ def get_all_rolling_features_bulk(db: Session) -> pd.DataFrame:
         # Drop internal helper column
         df = df.drop(columns=["_team_avg_gold"], errors="ignore")
 
+        # ------------------------------------------------------------------
+        # Step 6c — Opponent team rolling features
+        #
+        # Reuse team_aggs but flip team_id so each player row receives
+        # the opposing team's pre-match rolling averages.
+        #
+        # For matches where opponents are also tracked players the values
+        # will be real rolling stats.  For stub-only opponents the columns
+        # will be NaN — imputed to dataset median by the model training code.
+        # ------------------------------------------------------------------
+        opp_aggs = team_aggs[["match_id", "team_id",
+                               "team_avg_win_rate_20",
+                               "team_avg_kda_20",
+                               "team_avg_cs_min_20"]].copy()
+        # Flip: team 100 → 200 and vice versa so each player gets the enemy stats
+        opp_aggs["team_id"] = opp_aggs["team_id"].map({100: 200, 200: 100})
+        opp_aggs = opp_aggs.rename(columns={
+            "team_avg_win_rate_20": "opp_avg_win_rate_20",
+            "team_avg_kda_20":      "opp_avg_kda_20",
+            "team_avg_cs_min_20":   "opp_avg_cs_min_20",
+        })
+
+        df = df.merge(opp_aggs, on=["match_id", "team_id"], how="left")
+
+        # ------------------------------------------------------------------
+        # Step 6d — Differential features (team minus opponent)
+        #
+        # Why differentials beat absolutes:
+        #   A team avg KDA of 3.5 vs opponents of 2.8 (+0.7 edge) is far
+        #   more predictive than either value alone. Relative strength is
+        #   what actually drives win probability — this mirrors how
+        #   Elo/TrueSkill systems work and is backed by the matchup
+        #   comparison literature (Sharpe et al., 2026; PandaSkill 2025).
+        #
+        # NaN handling: if either side is NaN (stub opponents with no
+        # rolling history), the diff will be NaN — imputed to 0.0
+        # (neutral, no edge) by the model training code.
+        # ------------------------------------------------------------------
+        df["win_rate_diff"] = (
+            df["team_avg_win_rate_20"] - df["opp_avg_win_rate_20"]
+        )
+        df["kda_diff"] = (
+            df["team_avg_kda_20"] - df["opp_avg_kda_20"]
+        )
+        df["cs_diff"] = (
+            df["team_avg_cs_min_20"] - df["opp_avg_cs_min_20"]
+        )
+        df["gold_diff_norm"] = (
+            df["team_gold_diff_prior"] / 100.0  # scale to ~(-5, +5) range
+        )
+
+        # Blue side flag: team_id 100 = blue side
+        # Blue side wins ~51-52% in professional and high-elo play due to
+        # champion select order advantage (pick/ban structure).
+        df["blue_side"] = (df["team_id"] == 100).astype(int)
+
     return df
 
+
+def get_all_timeline_features_bulk(db: Session) -> pd.DataFrame:
+    """Return timeline features for ALL matches that have frame data.
+
+    Thin wrapper around ``get_timeline_features`` — fetches every distinct
+    ``match_id`` from ``timeline_participant_frames`` in a single query, then
+    delegates to ``get_timeline_features`` for the actual feature assembly.
+
+    Use this for training so callers do not need to manage match_id lists.
+
+    Returns:
+        DataFrame with one row per match that has T=10 frame data.
+        Columns: all ``TIMELINE_FEATURES`` + ``team100_won``.
+        Empty DataFrame if no frame data exists.
+    """
+    rows = db.execute(
+        text("SELECT DISTINCT match_id FROM timeline_participant_frames")
+    ).fetchall()
+    match_ids = [r[0] for r in rows]
+    if not match_ids:
+        return pd.DataFrame()
+    return get_timeline_features(db, match_ids)
+
+
+
+def get_match_differential_features_bulk(db: Session) -> pd.DataFrame:
+    """Build match-level training features for the matchup predictor.
+
+    One row per unique match. Features are team-level averages of tracked
+    players' pre-match rolling stats, plus differentials (team100 - team200).
+    Label is ``team100_won`` (1 if team 100 won, 0 otherwise).
+
+    Why this beats per-player training:
+        The per-player model never sees the opponent, so it cannot learn
+        relative strength signals. Here every row contains both teams,
+        so the model learns patterns like "when team100 outgolds team200
+        by X gpm, they win Y% of the time" — a genuine causal signal.
+
+    Matches where team200 has no tracked players still contribute: the
+    differentials are NaN (imputed to 0 = neutral) but team100's absolute
+    stats remain real features. The model learns to discount rows where
+    t200_tracked == 0 via the confidence count feature.
+
+    Returns:
+        DataFrame with columns:
+            t100_win_rate, t100_kda, t100_cs, t100_gold, t100_vision,
+            t100_kill_part, t100_role_norm_kda, t100_tracked,
+            t200_win_rate, t200_kda, t200_cs, t200_gold, t200_vision,
+            t200_tracked,
+            win_rate_diff, kda_diff, cs_diff, gold_diff, vision_diff,
+            kill_part_diff, role_norm_kda_diff,
+            patch_version_float, team100_won (label)
+    """
+    player_df = get_all_rolling_features_bulk(db)
+    if player_df.empty:
+        return pd.DataFrame()
+
+    STAT_COLS = [
+        "win_rate_20", "avg_kda_20", "avg_cs_per_min_20",
+        "avg_gold_per_min_20", "avg_kill_part_20", "vision_per_min_20",
+        "avg_role_norm_kda_20",
+    ]
+    available_stats = [c for c in STAT_COLS if c in player_df.columns]
+
+    # Aggregate to (match_id, team_id) level
+    agg_dict = {col: "mean" for col in available_stats}
+    agg_dict["win"] = "first"            # same for all players on a team
+    agg_dict["patch_version_float"] = "first"
+    agg_dict["puuid"] = "count"          # how many tracked players on this team
+
+    agg_dict = {k: v for k, v in agg_dict.items() if k in player_df.columns}
+
+    team_df = (
+        player_df
+        .groupby(["match_id", "team_id"])
+        .agg(agg_dict)
+        .reset_index()
+        .rename(columns={"puuid": "tracked_count"})
+    )
+
+    # Split teams
+    t100 = team_df[team_df["team_id"] == 100].copy()
+    t200 = team_df[team_df["team_id"] == 200].copy()
+
+    # Rename columns with team prefix
+    shared = {"match_id", "team_id", "win", "patch_version_float"}
+    t100_rename = {c: f"t100_{c}" for c in team_df.columns if c not in shared}
+    t200_rename = {c: f"t200_{c}" for c in team_df.columns if c not in shared}
+
+    t100 = t100.rename(columns=t100_rename)
+    t200 = t200.rename(columns=t200_rename)
+
+    t100_keep = ["match_id", "win", "patch_version_float"] + list(t100_rename.values())
+    t200_keep = ["match_id"] + list(t200_rename.values())
+
+    match_df = t100[[c for c in t100_keep if c in t100.columns]].merge(
+        t200[[c for c in t200_keep if c in t200.columns]],
+        on="match_id",
+        how="outer",
+    )
+
+    # Label from team100 perspective
+    match_df["team100_won"] = match_df["win"].astype(float)
+    match_df = match_df.dropna(subset=["team100_won"])
+
+    # Compute differentials for each stat
+    DIFF_MAP = [
+        ("win_rate_20",        "win_rate_diff"),
+        ("avg_kda_20",         "kda_diff"),
+        ("avg_cs_per_min_20",  "cs_diff"),
+        ("avg_gold_per_min_20","gold_diff"),
+        ("vision_per_min_20",  "vision_diff"),
+        ("avg_kill_part_20",   "kill_part_diff"),
+        ("avg_role_norm_kda_20","role_norm_kda_diff"),
+    ]
+    for stat, diff_col in DIFF_MAP:
+        c100, c200 = f"t100_{stat}", f"t200_{stat}"
+        if c100 in match_df.columns and c200 in match_df.columns:
+            match_df[diff_col] = match_df[c100] - match_df[c200]
+
+    # Tracked counts as confidence signals
+    if "t100_tracked_count" in match_df.columns:
+        match_df["t100_tracked"] = match_df["t100_tracked_count"].fillna(0)
+    if "t200_tracked_count" in match_df.columns:
+        match_df["t200_tracked"] = match_df["t200_tracked_count"].fillna(0)
+
+    return match_df.reset_index(drop=True)
