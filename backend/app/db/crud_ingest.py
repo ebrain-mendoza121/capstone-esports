@@ -404,9 +404,17 @@ def insert_match_bundle_for_player(
         with session.begin_nested():
             insert_draft_actions(session, match_id, info)
     except Exception as draft_err:
-        logger.warning(
-            f"insert_draft_actions skipped for {match_id}: {draft_err}. "
-            "Check native_enum=False on the DraftActions model or run `npx prisma db push`."
+        # Log at ERROR so failures surface clearly in server output.
+        # The savepoint ensures the rest of the match bundle is already committed.
+        logger.error(
+            "insert_draft_actions FAILED for %s — draft rows NOT saved. "
+            "Cause: %s. "
+            "Verify the draft_actions table exists (run `alembic upgrade head` or "
+            "`npx prisma db push`) and that the DraftActions model uses "
+            "native_enum=False on both SQLEnum columns.",
+            match_id,
+            draft_err,
+            exc_info=True,
         )
 
 
@@ -430,7 +438,6 @@ def insert_timeline(session: Session, match_id: str, timeline_json: dict) -> Non
         match_id=match_id,
         frame_interval=info.get("frameInterval"),
         end_of_game_result=info.get("endOfGameResult"),
-        raw_timeline_json=None,  # raw blob not stored — parsed frames/events are sufficient
     )
     session.add(tl)
     session.flush()

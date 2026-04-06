@@ -110,20 +110,33 @@ def get_timeline_frames_for_player(
 ) -> List[Dict[str, Any]]:
     """
     Returns all timeline frames for a specific player (by PUUID) in a match.
-    The participant_id is resolved from the raw timeline JSON stored in match_timelines.
+    Participant_id (1-10) is resolved via the players + participant_stats tables.
     """
-    tl = db.query(MatchTimeline).filter(MatchTimeline.match_id == match_id).first()
+    from app.models.participant_stats import ParticipantStats
+
+    tl = db.query(MatchTimeline.match_id).filter(MatchTimeline.match_id == match_id).first()
     if not tl:
         raise HTTPException(status_code=404, detail="Timeline not found for this match.")
 
-    # Look up participant_id from the raw timeline JSON
+    # Resolve puuid -> player -> participant_stats row to get the in-game participant_id.
+    # participant_stats.id is the internal PK; we use its position among the match's
+    # participants (ordered by id ASC) to derive the 1-based participant_id slot.
+    player = db.query(Player).filter(Player.puuid == puuid).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found.")
+
+    all_ps = (
+        db.query(ParticipantStats.id, ParticipantStats.player_id)
+        .filter(ParticipantStats.match_id == match_id)
+        .order_by(ParticipantStats.id)
+        .all()
+    )
+
     participant_id = None
-    if tl.raw_timeline_json:
-        participants = tl.raw_timeline_json.get("participants", [])
-        for p in participants:
-            if p.get("puuid") == puuid:
-                participant_id = p.get("participantId")
-                break
+    for slot, row in enumerate(all_ps, start=1):
+        if row.player_id == player.id:
+            participant_id = slot
+            break
 
     if participant_id is None:
         raise HTTPException(status_code=404, detail="Player not found in this match's timeline.")

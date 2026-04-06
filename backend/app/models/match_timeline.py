@@ -8,9 +8,8 @@ from app.db.session import Base
 
 class MatchTimeline(Base):
     """
-    Stores the raw Match-V5 timeline JSON and header metadata.
-    One row per match. Raw JSON preserved for forward compatibility
-    and as the source for AI feature extraction.
+    Stores Match-V5 timeline header metadata.
+    One row per match. Frame and event data stored in child tables.
     """
     __tablename__ = "match_timelines"
 
@@ -19,7 +18,6 @@ class MatchTimeline(Base):
     )
     frame_interval: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # ms between frames
     end_of_game_result: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    raw_timeline_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     match = relationship("Match", back_populates="timeline")
     participant_frames = relationship(
