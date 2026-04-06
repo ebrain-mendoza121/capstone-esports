@@ -19,14 +19,14 @@ def get_player_metrics(session: Session, puuid: str):
     row = session.execute(
         text("""
             SELECT
-                COUNT(*)                                            AS matches,
-                ROUND(AVG(ps.win::int)::numeric, 4)                AS win_rate,
-                ROUND(AVG(dm.kda)::numeric, 2)                     AS kda,
-                ROUND(AVG(dm.cs_per_min)::numeric, 2)              AS cs_per_min,
-                ROUND(AVG(dm.gold_per_min)::numeric, 2)            AS gold_per_min,
-                ROUND(AVG(dm.vision_per_min)::numeric, 2)          AS vision_per_min,
-                ROUND(AVG(dm.kill_participation)::numeric, 4)      AS kill_participation,
-                ROUND(AVG(dm.damage_share)::numeric, 4)            AS damage_share
+                COUNT(*)                                                   AS matches,
+                ROUND(AVG(CAST(ps.win AS INTEGER)), 4)                     AS win_rate,
+                ROUND(AVG(dm.kda), 2)                                      AS kda,
+                ROUND(AVG(dm.cs_per_min), 2)                               AS cs_per_min,
+                ROUND(AVG(dm.gold_per_min), 2)                             AS gold_per_min,
+                ROUND(AVG(dm.vision_per_min), 2)                           AS vision_per_min,
+                ROUND(AVG(dm.kill_participation), 4)                       AS kill_participation,
+                ROUND(AVG(dm.damage_share), 4)                             AS damage_share
             FROM derived_metrics dm
             JOIN players p        ON p.puuid = dm.puuid
             JOIN participant_stats ps
