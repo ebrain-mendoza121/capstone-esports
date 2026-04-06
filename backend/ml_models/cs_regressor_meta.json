@@ -1,9 +1,9 @@
 {
   "model_type": "xgboost",
-  "trained_at": "2026-03-27T14:26:45.937444+00:00",
-  "n_samples": 1417,
-  "n_train": 1133,
-  "n_test": 284,
+  "trained_at": "2026-04-06T15:18:15.425267+00:00",
+  "n_samples": 2617,
+  "n_train": 2093,
+  "n_test": 524,
   "sklearn_version": "1.8.0",
   "xgboost_version": "3.2.0",
   "feature_cols": [
@@ -27,30 +27,30 @@
     "opp_avg_cs_min_20"
   ],
   "train_medians": {
-    "avg_kda_20": 3.9618181818181815,
-    "avg_cs_per_min_20": 7.58625,
-    "avg_gold_per_min_20": 455.63,
-    "avg_kill_part_20": 0.5114307692307692,
-    "death_rate_20": 4.933333333333334,
-    "vision_per_min_20": 1.0711111111111111,
-    "kda_std_10": 3.2567417255082827,
-    "cs_trend_10": -0.007454545454545463,
+    "avg_kda_20": 3.8741176470588234,
+    "avg_cs_per_min_20": 7.446842105263158,
+    "avg_gold_per_min_20": 449.1835714285714,
+    "avg_kill_part_20": 0.51305,
+    "death_rate_20": 5.0,
+    "vision_per_min_20": 1.1016666666666666,
+    "kda_std_10": 3.165087500984592,
+    "cs_trend_10": 0.0044848484848484865,
     "team_avg_win_rate_20": 0.5714285714285714,
-    "team_avg_kda_20": 3.9618181818181815,
-    "team_avg_cs_min_20": 7.58625,
-    "team_gold_diff_prior": -322.50272727272727,
-    "patch_version_float": 16.05,
+    "team_avg_kda_20": 3.8741176470588234,
+    "team_avg_cs_min_20": 7.446842105263158,
+    "team_gold_diff_prior": -309.0733333333333,
+    "patch_version_float": 16.06,
     "role_encoded": 2.0,
-    "avg_role_norm_kda_20": -0.0681766067359971,
+    "avg_role_norm_kda_20": -0.07953870718210349,
     "opp_avg_win_rate_20": 0.5,
     "opp_avg_kda_20": 2.5,
     "opp_avg_cs_min_20": 7.0
   },
   "metrics": {
-    "rmse": 1.076,
-    "mae": 0.7822,
-    "r2": 0.8914,
-    "ridge_r2": 0.6376,
-    "xgb_r2": 0.8914
+    "rmse": 1.1486,
+    "mae": 0.8041,
+    "r2": 0.8739,
+    "ridge_r2": 0.6653,
+    "xgb_r2": 0.8739
   }
 }

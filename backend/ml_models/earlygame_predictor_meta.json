@@ -1,9 +1,9 @@
 {
   "model_type": "logistic",
-  "trained_at": "2026-03-27T14:27:02.122416+00:00",
-  "n_samples": 1928,
-  "n_train": 1542,
-  "n_test": 386,
+  "trained_at": "2026-04-06T15:19:40.888556+00:00",
+  "n_samples": 3485,
+  "n_train": 2788,
+  "n_test": 697,
   "sklearn_version": "1.8.0",
   "xgboost_version": "3.2.0",
   "feature_cols": [
@@ -18,56 +18,56 @@
     "first_dragon_team"
   ],
   "train_medians": {
-    "gold_diff_10": 132.0,
-    "xp_diff_10": 62.5,
+    "gold_diff_10": 70.0,
+    "xp_diff_10": 21.0,
     "level_diff_10": 0.0,
-    "cs_diff_10": 0.0,
-    "gold_diff_15": 71.5,
-    "xp_diff_15": 117.0,
+    "cs_diff_10": -1.0,
+    "gold_diff_15": 77.0,
+    "xp_diff_15": 44.0,
     "first_blood_team": 1.0,
     "first_tower_team": 0.0,
     "first_dragon_team": -1.0
   },
   "metrics": {
-    "accuracy": 0.772,
-    "roc_auc": 0.8656
+    "accuracy": 0.7604,
+    "roc_auc": 0.8355
   },
   "feature_coefficients": [
     {
       "feature": "gold_diff_10",
-      "coefficient": -0.2252
+      "coefficient": -0.1066
     },
     {
       "feature": "xp_diff_10",
-      "coefficient": -0.0306
+      "coefficient": 0.0632
     },
     {
       "feature": "level_diff_10",
-      "coefficient": 0.0801
+      "coefficient": -0.0208
     },
     {
       "feature": "cs_diff_10",
-      "coefficient": 0.1861
+      "coefficient": 0.0952
     },
     {
       "feature": "gold_diff_15",
-      "coefficient": 1.4366
+      "coefficient": 1.4448
     },
     {
       "feature": "xp_diff_15",
-      "coefficient": 0.7725
+      "coefficient": 0.7119
     },
     {
       "feature": "first_blood_team",
-      "coefficient": 0.0895
+      "coefficient": 0.0678
     },
     {
       "feature": "first_tower_team",
-      "coefficient": -0.043
+      "coefficient": -0.0482
     },
     {
       "feature": "first_dragon_team",
-      "coefficient": 0.2059
+      "coefficient": 0.2483
     }
   ]
 }

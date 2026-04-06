@@ -1,9 +1,9 @@
 {
   "model_type": "xgboost",
-  "trained_at": "2026-03-31T19:41:50.112068+00:00",
-  "n_samples": 2602,
-  "n_train": 2081,
-  "n_test": 521,
+  "trained_at": "2026-04-06T15:17:53.565669+00:00",
+  "n_samples": 2617,
+  "n_train": 2093,
+  "n_test": 524,
   "sklearn_version": "1.8.0",
   "xgboost_version": "3.2.0",
   "feature_cols": [
@@ -35,57 +35,57 @@
   ],
   "train_medians": {
     "win_rate_20": 0.5714285714285714,
-    "avg_kda_20": 3.8890000000000002,
-    "avg_cs_per_min_20": 7.442142857142857,
-    "avg_gold_per_min_20": 448.9661052631579,
-    "avg_kill_part_20": 0.51335,
+    "avg_kda_20": 3.8741176470588234,
+    "avg_cs_per_min_20": 7.446842105263158,
+    "avg_gold_per_min_20": 449.1835714285714,
+    "avg_kill_part_20": 0.51305,
     "win_streak": 1.0,
     "death_rate_20": 5.0,
-    "vision_per_min_20": 1.1045299145299143,
-    "kda_std_10": 3.1729519578307084,
-    "cs_trend_10": 0.0036666666666666627,
+    "vision_per_min_20": 1.1016666666666666,
+    "kda_std_10": 3.165087500984592,
+    "cs_trend_10": 0.0044848484848484865,
     "team_avg_win_rate_20": 0.5714285714285714,
-    "team_avg_kda_20": 3.8890000000000002,
-    "team_avg_cs_min_20": 7.442142857142857,
-    "team_gold_diff_prior": -308.9509523809524,
+    "team_avg_kda_20": 3.8741176470588234,
+    "team_avg_cs_min_20": 7.446842105263158,
+    "team_gold_diff_prior": -309.0733333333333,
     "patch_version_float": 16.06,
     "role_encoded": 2.0,
-    "avg_role_norm_kda_20": -0.07982027710556228,
+    "avg_role_norm_kda_20": -0.07953870718210349,
     "opp_avg_win_rate_20": 0.5,
     "opp_avg_kda_20": 2.5,
     "opp_avg_cs_min_20": 7.0,
     "win_rate_diff": 0.0,
     "kda_diff": 0.0,
     "cs_diff": 0.0,
-    "gold_diff_norm": -3.0895095238095243,
+    "gold_diff_norm": -3.090733333333333,
     "blue_side": 0.0
   },
   "metrics": {
-    "accuracy": 0.4933,
-    "roc_auc": 0.5012,
-    "lr_auc": 0.4718,
-    "xgb_auc": 0.5012
+    "accuracy": 0.5363,
+    "roc_auc": 0.5022,
+    "lr_auc": 0.4765,
+    "xgb_auc": 0.5022
   },
   "top_factors": [
     {
       "feature": "avg_gold_per_min_20",
-      "importance": 0.0952
-    },
-    {
-      "feature": "vision_per_min_20",
-      "importance": 0.085
+      "importance": 0.0786
     },
     {
       "feature": "avg_kill_part_20",
-      "importance": 0.077
+      "importance": 0.0786
     },
     {
-      "feature": "role_encoded",
-      "importance": 0.0757
+      "feature": "vision_per_min_20",
+      "importance": 0.0774
     },
     {
-      "feature": "avg_role_norm_kda_20",
-      "importance": 0.074
+      "feature": "patch_version_float",
+      "importance": 0.0773
+    },
+    {
+      "feature": "win_rate_20",
+      "importance": 0.0752
     }
   ]
 }
