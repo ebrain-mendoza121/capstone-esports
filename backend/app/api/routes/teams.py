@@ -279,13 +279,13 @@ async def predict_matchup(
             ("t100_win_rate_20",        blue_stats, "win_rate_20",        0.5),
             ("t100_avg_kda_20",         blue_stats, "avg_kda_20",         2.5),
             ("t100_avg_cs_per_min_20",  blue_stats, "avg_cs_per_min_20",  7.0),
-            ("t100_avg_gold_per_min_20",blue_stats, "avg_gold_per_min_20",350.0),
+            ("t100_avg_gold_per_min_20", blue_stats, "avg_gold_per_min_20", 350.0),
             ("t100_vision_per_min_20",  blue_stats, "vision_per_min_20",  1.0),
             ("t100_avg_kill_part_20",   blue_stats, "avg_kill_part_20",   0.5),
             ("t200_win_rate_20",        red_stats,  "win_rate_20",        0.5),
             ("t200_avg_kda_20",         red_stats,  "avg_kda_20",         2.5),
             ("t200_avg_cs_per_min_20",  red_stats,  "avg_cs_per_min_20",  7.0),
-            ("t200_avg_gold_per_min_20",red_stats,  "avg_gold_per_min_20",350.0),
+            ("t200_avg_gold_per_min_20", red_stats,  "avg_gold_per_min_20", 350.0),
             ("t200_vision_per_min_20",  red_stats,  "vision_per_min_20",  1.0),
             ("t200_avg_kill_part_20",   red_stats,  "avg_kill_part_20",   0.5),
         ]
@@ -296,7 +296,7 @@ async def predict_matchup(
         row["win_rate_diff"]  = row["t100_win_rate_20"]        - row["t200_win_rate_20"]
         row["kda_diff"]       = row["t100_avg_kda_20"]         - row["t200_avg_kda_20"]
         row["cs_diff"]        = row["t100_avg_cs_per_min_20"]  - row["t200_avg_cs_per_min_20"]
-        row["gold_diff"]      = row["t100_avg_gold_per_min_20"]- row["t200_avg_gold_per_min_20"]
+        row["gold_diff"]      = row["t100_avg_gold_per_min_20"] - row["t200_avg_gold_per_min_20"]
         row["vision_diff"]    = row["t100_vision_per_min_20"]  - row["t200_vision_per_min_20"]
         row["kill_part_diff"] = row["t100_avg_kill_part_20"]   - row["t200_avg_kill_part_20"]
         row["t100_tracked"]   = float(len(blue_stats))

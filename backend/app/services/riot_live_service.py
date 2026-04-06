@@ -228,7 +228,7 @@ async def _get_stats_from_riot(
     batch_size = 5
 
     for i in range(0, len(match_ids), batch_size):
-        batch = match_ids[i : i + batch_size]
+        batch = match_ids[i:i + batch_size]
         tasks = [client.get_match(mid, routing) for mid in batch]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -245,8 +245,8 @@ async def _get_stats_from_riot(
                             "kills":                 p.get("kills", 0),
                             "deaths":                p.get("deaths", 0),
                             "assists":               p.get("assists", 0),
-                            "cs":                    p.get("totalMinionsKilled", 0)
-                                                     + p.get("neutralMinionsKilled", 0),
+                            "cs":                    (p.get("totalMinionsKilled", 0)
+                                                      + p.get("neutralMinionsKilled", 0)),
                             "gold_earned":           p.get("goldEarned", 0),
                             "vision_score":          p.get("visionScore", 0),
                             "game_duration_seconds": game_dur,

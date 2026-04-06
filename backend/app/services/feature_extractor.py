@@ -1039,9 +1039,9 @@ def get_all_rolling_features_bulk(db: Session) -> pd.DataFrame:
         # will be NaN — imputed to dataset median by the model training code.
         # ------------------------------------------------------------------
         opp_aggs = team_aggs[["match_id", "team_id",
-                               "team_avg_win_rate_20",
-                               "team_avg_kda_20",
-                               "team_avg_cs_min_20"]].copy()
+                              "team_avg_win_rate_20",
+                              "team_avg_kda_20",
+                              "team_avg_cs_min_20"]].copy()
         # Flip: team 100 → 200 and vice versa so each player gets the enemy stats
         opp_aggs["team_id"] = opp_aggs["team_id"].map({100: 200, 200: 100})
         opp_aggs = opp_aggs.rename(columns={
@@ -1196,10 +1196,10 @@ def get_match_differential_features_bulk(db: Session) -> pd.DataFrame:
         ("win_rate_20",        "win_rate_diff"),
         ("avg_kda_20",         "kda_diff"),
         ("avg_cs_per_min_20",  "cs_diff"),
-        ("avg_gold_per_min_20","gold_diff"),
+        ("avg_gold_per_min_20", "gold_diff"),
         ("vision_per_min_20",  "vision_diff"),
         ("avg_kill_part_20",   "kill_part_diff"),
-        ("avg_role_norm_kda_20","role_norm_kda_diff"),
+        ("avg_role_norm_kda_20", "role_norm_kda_diff"),
     ]
     for stat, diff_col in DIFF_MAP:
         c100, c200 = f"t100_{stat}", f"t200_{stat}"

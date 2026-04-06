@@ -170,7 +170,7 @@ class RiotClient:
         tasks = [asyncio.create_task(_fetch_one(mid)) for mid in match_ids]
         # Process in batches so we can insert a small pause between groups
         for i in range(0, len(tasks), concurrency):
-            batch = tasks[i : i + concurrency]
+            batch = tasks[i:i + concurrency]
             await asyncio.gather(*batch)
             if i + concurrency < len(tasks):
                 # ~0.3s between batches — gentle on dev-key rate limits
