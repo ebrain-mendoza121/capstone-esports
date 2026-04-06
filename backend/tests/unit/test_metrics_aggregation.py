@@ -38,8 +38,13 @@ def _make_derived_row(matches, win_rate, kda, cs_per_min, gold_per_min,
 def _make_raw_stats(kills, deaths, assists, cs, gold, vision, duration_s, win):
     """Build a (ParticipantStats, Match) mock tuple (fallback path)."""
     ps = MagicMock()
-    ps.kills = kills; ps.deaths = deaths; ps.assists = assists
-    ps.cs = cs; ps.gold_earned = gold; ps.vision_score = vision; ps.win = win
+    ps.kills = kills
+    ps.deaths = deaths
+    ps.assists = assists
+    ps.cs = cs
+    ps.gold_earned = gold
+    ps.vision_score = vision
+    ps.win = win
     match = MagicMock()
     match.game_duration = duration_s
     return (ps, match)
@@ -86,7 +91,7 @@ def test_primary_path_returns_all_fields():
     assert result["win_rate"]           == pytest.approx(0.6,  rel=0.01)
     assert result["kda"]                == pytest.approx(3.5,  rel=0.01)
     assert result["cs_per_min"]         == pytest.approx(7.2,  rel=0.01)
-    assert result["gold_per_min"]       == pytest.approx(420.0,rel=0.01)
+    assert result["gold_per_min"]       == pytest.approx(420.0, rel=0.01)
     assert result["vision_per_min"]     == pytest.approx(1.8,  rel=0.01)
     assert result["kill_participation"] == pytest.approx(0.72, rel=0.01)
     assert result["damage_share"]       == pytest.approx(0.25, rel=0.01)
@@ -134,8 +139,8 @@ def test_fallback_single_match_metrics():
     assert result["win_rate"]   == pytest.approx(1.0)
     assert result["kda"]        == pytest.approx(4.0,   rel=0.02)   # (5+7)/3
     assert result["cs_per_min"] == pytest.approx(5.67,  rel=0.02)   # 170/30
-    assert result["gold_per_min"] == pytest.approx(400.0, rel=0.02) # 12000/30
-    assert result["vision_per_min"] == pytest.approx(1.0, rel=0.02) # 30/30
+    assert result["gold_per_min"] == pytest.approx(400.0, rel=0.02)  # 12000/30
+    assert result["vision_per_min"] == pytest.approx(1.0, rel=0.02)  # 30/30
     # kill_participation and damage_share are unavailable from raw stats
     assert result["kill_participation"] == 0.0
     assert result["damage_share"]       == 0.0
