@@ -195,7 +195,7 @@ async def get_match_detail(match_id: str, db: Session = Depends(get_db)) -> Dict
 
 
 @router.get("/{match_id}/draft")
-def get_match_draft(match_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
+async def get_match_draft(match_id: str, db: Session = Depends(get_db)) -> Dict[str, Any]:
     """
     Return the full draft (picks and bans for both teams) for a match.
 
@@ -220,6 +220,8 @@ def get_match_draft(match_id: str, db: Session = Depends(get_db)) -> Dict[str, A
             detail="No draft actions found for this match. Re-ingest or run POST /backfill/draft-actions.",
         )
 
+    champion_map = await get_champion_map()
+
     result: Dict[int, Dict] = {
         100: {"bans": [], "picks": []},
         200: {"bans": [], "picks": []},
@@ -232,12 +234,14 @@ def get_match_draft(match_id: str, db: Session = Depends(get_db)) -> Dict[str, A
         if a.action_type == ActionType.PICK:
             team_bucket["picks"].append({
                 "champion_id": a.champion_id,
+                "champion_name": champion_map.get(a.champion_id),
                 "role": a.role,
                 "turn": a.turn,
             })
         else:
             team_bucket["bans"].append({
                 "champion_id": a.champion_id,
+                "champion_name": champion_map.get(a.champion_id),
                 "turn": a.turn,
             })
 

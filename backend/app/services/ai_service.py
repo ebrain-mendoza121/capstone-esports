@@ -535,18 +535,13 @@ def get_champion_recommendations(
         "SUPPORT": 2.5,
     }
 
-    # Attempt to resolve champion names from the ddragon cache.
-    try:
-        from app.services.ddragon import get_champion_name  # type: ignore[attr-defined]
-    except ImportError:
-        try:
-            from app.services import ddragon as _ddragon
+    # Resolve champion names from the module-level DDragon cache.
+    # The cache is populated at server startup via the lifespan preload in main.py.
+    # Sync-safe: reads the already-populated dict directly without awaiting.
+    from app.services import ddragon as _ddragon
 
-            def get_champion_name(cid: int) -> Optional[str]:  # type: ignore[misc]
-                return _ddragon._champion_map.get(cid)
-        except Exception:
-            def get_champion_name(cid: int) -> Optional[str]:  # type: ignore[misc]
-                return None
+    def get_champion_name(cid: int) -> Optional[str]:
+        return _ddragon._champion_map.get(cid)
 
     # Recency: unix-ms timestamp of most recent game on this champion
     now_ms = datetime.now(timezone.utc).timestamp() * 1000
