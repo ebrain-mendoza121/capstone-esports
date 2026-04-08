@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "dev:backend": "cd ../backend && uvicorn app.main:app --reload --port 8000",
+    "dev:all": "concurrently --kill-others-on-fail --names \"BACKEND,FRONTEND\" --prefix-colors \"blue,green\" \"npm run dev:backend\" \"next dev\"",
+    "kill:backend": "node -e \"const { execSync } = require('child_process'); try { execSync(process.platform === 'win32' ? 'netstat -ano | findstr :8000' : 'lsof -ti:8000 | xargs kill -9'); } catch(e) {}\"",
+    "dev:fresh": "npm run kill:backend && npm run dev:all"
   },
   "dependencies": {
     "next": "16.1.6",
@@ -17,6 +21,8 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "typescript": "^5"
