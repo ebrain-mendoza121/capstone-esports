@@ -59,7 +59,7 @@ export interface MatchHistoryEntry {
   patch_version: string;
   kda: number;
   cs_per_min: number;
-  queue: QueueCode;
+  queue_id: QueueCode;
 }
 
 export interface TeamStats {
@@ -67,7 +67,8 @@ export interface TeamStats {
   towers: number;
   dragons: number;
   barons: number;
-  inhibs: number;
+  inhibitor_kills: number;
+  rift_herald_kills: number;
   win: boolean;
 }
 
@@ -81,19 +82,21 @@ export interface MatchParticipant {
   assists: number;
   cs: number;
   gold_earned: number;
-  damage: number;
+  total_damage: number;
   vision_score: number;
   items: number[];
-  keystone: string;
+  perks: {
+    keystone: string;
+  };
   team_id: 100 | 200;
   win: boolean;
 }
 
 export interface MatchDetail {
   match_id: string;
-  queue: QueueCode;
-  patch: string;
-  duration: number;
+  queue_id: QueueCode;
+  patch_version: string;
+  game_duration: number;
   date: string;
   teams: TeamStats[];
   participants: MatchParticipant[];
@@ -133,13 +136,12 @@ export interface ChampionBanRate {
 }
 
 export interface RuneMapEntry {
-  rune_id: number;
-  rune_name: string;
+  [runeId: string]: string;
 }
 
 export interface TimelineAvailability {
   match_id: string;
-  frame_rows: number;
+  participant_frame_rows: number;
   event_rows: number;
   frame_interval_ms: number;
   participant_puuids: string[];
@@ -164,10 +166,12 @@ export type TimelineEventType =
   | "ITEM_PURCHASED";
 
 export interface TimelineEvent {
-  id: string;
+  event_id: string;
   timestamp: number;
   type: TimelineEventType;
-  detail: string;
+  detail: {
+    killerId: number;
+  };
 }
 
 export interface TimelineEventsResponse {
@@ -207,13 +211,13 @@ export interface FrontendMvpClient {
   getChampionBanRate(championId: number): Promise<ChampionBanRate>;
 
   // Page 6
-  getRunesMap(): Promise<RuneMapEntry[]>;
-  getPlayerRuneHistory(puuid: string, limit: number): Promise<RuneEntry[]>;
+  getRunesMap(): Promise<RuneMapEntry[]>;//TODO
+  getPlayerRuneHistory(puuid: string, limit: number): Promise<RuneEntry[]>;//TODO
 
   // Page 7
-  getTimelineAvailability(matchId: string): Promise<TimelineAvailability>;
-  getTimelineFramesByPuuid(matchId: string, puuid: string): Promise<TimelineFrame[]>;
-  getTimelineEvents(matchId: string, limit: number, cursor?: string): Promise<TimelineEventsResponse>;
+  getTimelineAvailability(matchId: string): Promise<TimelineAvailability>;//TODO
+  getTimelineFramesByPuuid(matchId: string, puuid: string): Promise<TimelineFrame[]>;//TODO
+  getTimelineEvents(matchId: string, limit: number, cursor?: string): Promise<TimelineEventsResponse>;//TODO
 }
 
 const CHAMPIONS = [
@@ -300,116 +304,68 @@ function makePuuid(seedText: string): string {
   return `puuid_${hash(seedText).toString(36).slice(0, 10)}`;
 }
 
+async function getPuuidFromRiotId(riotId: string, tagLine: string){
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/players/`);
+  if (!res.ok) {
+    throw new Error("Failed to fetch player list from Riot API");
+  }
+
+  const players = await res.json();
+  let puuid = null;
+  players.forEach((player: PlayerSummary) => {
+    if (player.riot_id === riotId && player.tag_line === tagLine) {
+      puuid = player.puuid;
+    }
+  });
+  
+  return puuid;
+}
+
 function makeRiotId(seed: string): string {
   return `player${hash(seed).toString().slice(0, 4)}`;
 }
 
-function makeRuneEntry(seed: string, index: number): RuneEntry {
-  const rng = createRng(`${seed}:rune:${index}`);
-
-  return {
-    match_id: `EUW1_${hash(`${seed}:${index}`)}`,
-    champion: pick(rng, CHAMPIONS),
-    keystone_name: pick(rng, KEYSTONES),
-    primary_style_name: pick(rng, PRIMARY_STYLES),
-    primary_slot1_name: pick(rng, SLOT_NAMES.primary),
-    primary_slot2_name: pick(rng, SLOT_NAMES.primary),
-    primary_slot3_name: pick(rng, SLOT_NAMES.primary),
-    sub_style_name: pick(rng, SUB_STYLES),
-    sub_slot1_name: pick(rng, SLOT_NAMES.sub),
-    sub_slot2_name: pick(rng, SLOT_NAMES.sub),
-  };
-}
-
-const inMemoryPlayers: PlayerSummary[] = [
-  { puuid: makePuuid("faker"), riot_id: "Faker", tag_line: "KR1", region: "KR" },
-  { puuid: makePuuid("doublelift"), riot_id: "Doublelift", tag_line: "NA", region: "NA1" },
-  { puuid: makePuuid("caps"), riot_id: "Caps", tag_line: "EUW", region: "EUW1" },
-];
-
-function resolvePlayer(puuid: string): PlayerSummary {
-  const found = inMemoryPlayers.find((player) => player.puuid === puuid);
-  if (found) {
-    return found;
-  }
-
+async function resolvePlayer(puuid: string){
+  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/players/${puuid}/`);
+    if (!res.ok) {
+      if (res.status === 404) {
+        throw new MockApiError(
+          404,
+          "Player not found on Riot servers"
+        );
+      }
+      if (res.status === 503) {
+        throw new MockApiError(
+          503,
+          "Riot API rate limit hit — try again in 30 seconds"
+        );
+      }
+      if (res.status === 502) {
+        throw new MockApiError(
+          502,
+          "Riot API error — check API key"
+        );
+      }
+      throw new Error("Unexpected API error");
+    }
+  const player = await res.json();
   return {
     puuid,
-    riot_id: makeRiotId(puuid),
-    tag_line: "MVP",
-    region: pick(createRng(puuid), REGIONS),
+    riot_id: player.riot_id,
+    tag_line: player.tag_line,
+    region: player.region,
+    created_at: player.created_at
   };
 }
-
-function makeMatchRow(puuid: string, index: number): MatchHistoryEntry {
-  const rng = createRng(`${puuid}:match:${index}`);
-  const kills = randomInt(rng, 1, 18);
-  const deaths = randomInt(rng, 1, 10);
-  const assists = randomInt(rng, 2, 22);
-  const cs = randomInt(rng, 120, 360);
-  const duration = randomInt(rng, 1200, 2400);
-
-  return {
-    match_id: `MATCH_${hash(`${puuid}:${index}`)}`,
-    champion: pick(rng, CHAMPIONS),
-    champion_id: randomInt(rng, 1, 300),
-    role: pick(rng, ROLES),
-    kills,
-    deaths,
-    assists,
-    cs,
-    gold_earned: randomInt(rng, 8200, 19700),
-    vision_score: randomInt(rng, 12, 92),
-    items: Array.from({ length: 7 }, () => randomInt(rng, 1001, 7000)),
-    win: rng() > 0.46,
-    game_duration: duration,
-    patch_version: pick(rng, PATCHES),
-    kda: randomFloat(rng, 1.2, 6.8, 2),
-    cs_per_min: Number((cs / (duration / 60)).toFixed(2)),
-    queue: pick(rng, QUEUES),
-  };
-}
-
-function makeMatchParticipants(matchId: string): MatchParticipant[] {
-  const rng = createRng(`${matchId}:participants`);
-
-  return Array.from({ length: 10 }, (_, index) => {
-    const teamId: 100 | 200 = index < 5 ? 100 : 200;
-    const role = ROLES[index % ROLES.length];
-    const participantPuuid = makePuuid(`${matchId}:${index}`);
-
-    return {
-      puuid: participantPuuid,
-      riot_id: makeRiotId(participantPuuid),
-      champion: pick(rng, CHAMPIONS),
-      role,
-      kills: randomInt(rng, 0, 16),
-      deaths: randomInt(rng, 0, 12),
-      assists: randomInt(rng, 1, 24),
-      cs: randomInt(rng, 90, 360),
-      gold_earned: randomInt(rng, 7000, 20000),
-      damage: randomInt(rng, 8000, 58000),
-      vision_score: randomInt(rng, 8, 88),
-      items: Array.from({ length: 7 }, () => randomInt(rng, 1001, 7000)),
-      keystone: pick(rng, KEYSTONES),
-      team_id: teamId,
-      win: teamId === 100,
-    };
-  });
-}
-
-const runesMapStatic: RuneMapEntry[] = [
-  { rune_id: 8005, rune_name: "Press the Attack" },
-  { rune_id: 8010, rune_name: "Conqueror" },
-  { rune_id: 8229, rune_name: "Arcane Comet" },
-  { rune_id: 8128, rune_name: "Dark Harvest" },
-  { rune_id: 8465, rune_name: "Guardian" },
-  { rune_id: 8369, rune_name: "First Strike" },
-];
 
 const frontendMvpClient: FrontendMvpClient = {
   async listPlayers() {
-    return [...inMemoryPlayers];
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/players/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch player list from Riot API");
+    }
+    const players = await res.json();
+    return players.slice(0, 20); // Return only the first 20 for listing
   },
 
   async ingestPlayer(payload) {
@@ -425,7 +381,7 @@ const frontendMvpClient: FrontendMvpClient = {
       throw new MockApiError(502, "Riot API error — check API key");
     }
 
-    const puuid = makePuuid(`${payload.gameName}:${payload.tagLine}:${Date.now()}`);
+    const puuid = await getPuuidFromRiotId(payload.gameName, payload.tagLine) || "";
 
     const player: PlayerSummary = {
       puuid,
@@ -434,147 +390,178 @@ const frontendMvpClient: FrontendMvpClient = {
       region: payload.platform,
     };
 
-    inMemoryPlayers.unshift(player);
     return player;
   },
 
   async getPlayer(puuid) {
-    const player = resolvePlayer(puuid);
+    const player = await resolvePlayer(puuid);
     return {
-      ...player,
-      created_at: formatDateFromOffset(randomInt(createRng(`${puuid}:created`), 20, 600)),
+      ...player
     };
   },
 
   async getPlayerMetrics(puuid) {
-    const rng = createRng(`${puuid}:metrics`);
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/metrics/player/${puuid}/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch player metrics from Riot API");
+    }
+    const metrics = await res.json();
+
     return {
-      matches_played: randomInt(rng, 65, 460),
-      win_rate: randomFloat(rng, 42, 74, 1),
-      avg_kda: randomFloat(rng, 1.8, 5.9, 2),
-      avg_cs_per_min: randomFloat(rng, 5.1, 9.7, 2),
-      avg_gold_per_min: randomFloat(rng, 320, 590, 1),
-      avg_vision_per_min: randomFloat(rng, 0.8, 2.2, 2),
+      matches_played: metrics.matches,
+      win_rate: metrics.win_rate,
+      avg_kda: metrics.kda,
+      avg_cs_per_min: metrics.cs_per_min,
+      avg_gold_per_min: metrics.gold_per_min,
+      avg_vision_per_min: metrics.vision_per_min,
     };
   },
 
   async getPlayerRunes(puuid, limit) {
-    return Array.from({ length: limit }, (_, index) => makeRuneEntry(puuid, index));
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/runes/?limit=${limit}`);
+    if (!res.ok) {      throw new Error("Failed to fetch player rune history from Riot API");
+    }
+    const runes = await res.json();
+
+    return [...runes.runes];
   },
 
   async getMatchesByPlayer(puuid, limit) {
-    return Array.from({ length: limit }, (_, index) => makeMatchRow(puuid, index));
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/matches/player/${puuid}/?limit=${limit}`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch player match history from Riot API");
+    }
+    const matches = await res.json();
+
+    return [...matches];
   },
 
   async getMatch(matchId) {
-    const rng = createRng(`${matchId}:match`);
-
-    return {
-      match_id: matchId,
-      queue: pick(rng, QUEUES),
-      patch: pick(rng, PATCHES),
-      duration: randomInt(rng, 1200, 2400),
-      date: formatDateFromOffset(randomInt(rng, 0, 20)),
-      teams: [
-        {
-          team_id: 100,
-          towers: randomInt(rng, 2, 11),
-          dragons: randomInt(rng, 0, 4),
-          barons: randomInt(rng, 0, 3),
-          inhibs: randomInt(rng, 0, 3),
-          win: true,
-        },
-        {
-          team_id: 200,
-          towers: randomInt(rng, 1, 8),
-          dragons: randomInt(rng, 0, 3),
-          barons: randomInt(rng, 0, 2),
-          inhibs: randomInt(rng, 0, 2),
-          win: false,
-        },
-      ],
-      participants: makeMatchParticipants(matchId),
-      has_timeline: hash(matchId) % 5 !== 0,
-    };
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/matches/${matchId}/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch match details from Riot API");
+    }
+    const match = await res.json();
+    return match;
   },
 
   async getMatchDraft(matchId) {
-    const rng = createRng(`${matchId}:draft`);
-
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/matches/${matchId}/draft/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch match draft data from Riot API");
+    }
+    const draft = await res.json();
     return {
-      team100_bans: Array.from({ length: 5 }, () => pick(rng, CHAMPIONS)),
-      team200_bans: Array.from({ length: 5 }, () => pick(rng, CHAMPIONS)),
-      team100_picks: Array.from({ length: 5 }, () => pick(rng, CHAMPIONS)),
-      team200_picks: Array.from({ length: 5 }, () => pick(rng, CHAMPIONS)),
-    };
+    team100_bans: (draft.draft["100"].bans).map(
+      (ban: { champion_id: number }) => ban.champion_id
+    ),
+    team200_bans: (draft.draft["200"].bans).map(
+      (ban: { champion_id: number }) => ban.champion_id
+    ),
+    team100_picks: (draft.draft["100"].picks).map(
+      (pick: { champion_id: number }) => pick.champion_id
+    ),
+    team200_picks: (draft.draft["200"].picks).map(
+      (pick: { champion_id: number }) => pick.champion_id
+    ),
+  }
   },
 
   async getPlayerBanAnalytics(puuid, limit) {
-    const rng = createRng(`${puuid}:bans:${limit}`);
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/bans/?limit=${limit}`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch player ban analytics from Riot API");
+    }
+    const banAnalytics = await res.json();
+    const aggregateBans = (
+      bans: Array<{ champion_id: number; champion_name: string }>
+    ): BanEntry[] => {
+      const byChampion = new Map<number, BanEntry>();
 
-    const makeEntry = (): BanEntry => ({
-      champion_id: randomInt(rng, 1, 300),
-      champion_name: pick(rng, CHAMPIONS),
-      count: randomInt(rng, 4, 60),
-    });
+      bans.forEach((ban) => {
+        const existing = byChampion.get(ban.champion_id);
+
+        if (existing) {
+          existing.count += 1;
+        } else {
+          byChampion.set(ban.champion_id, {
+            champion_id: ban.champion_id,
+            champion_name: ban.champion_name,
+            count: 1,
+          });
+        }
+      });
+
+      return Array.from(byChampion.values()).sort((a, b) => b.count - a.count);
+    };
 
     return {
-      matches_analyzed: limit,
-      banned_against: Array.from({ length: 10 }, makeEntry),
-      banned_by_team: Array.from({ length: 10 }, makeEntry),
+      matches_analyzed: banAnalytics.matches_analyzed,
+      banned_against: aggregateBans(banAnalytics.bans_against ?? []),
+      banned_by_team: aggregateBans(banAnalytics.bans_by_team ?? []),
     };
   },
 
   async getGlobalMostBanned(limit) {
-    const rng = createRng(`global-bans:${limit}`);
-    return Array.from({ length: limit }, () => ({
-      champion_id: randomInt(rng, 1, 300),
-      champion_name: pick(rng, CHAMPIONS),
-      ban_count: randomInt(rng, 120, 940),
-    }));
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/bans/most-banned?limit=${limit}`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch global ban data from Riot API");
+    }
+    const globalBans = await res.json();
+    return [...globalBans];
   },
 
   async getChampionBanRate(championId) {
-    const rng = createRng(`champion-rate:${championId}`);
-    const totalMatches = randomInt(rng, 600, 5000);
-    const timesBanned = randomInt(rng, 50, Math.floor(totalMatches * 0.45));
-
-    return {
-      champion_name: CHAMPIONS[championId % CHAMPIONS.length],
-      ban_rate: Number(((timesBanned / totalMatches) * 100).toFixed(2)),
-      times_banned: timesBanned,
-      total_matches: totalMatches,
-    };
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/champion/${championId}/ban-rate/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch champion ban rate from Riot API");
+    }
+    const banRate = await res.json();
+    return banRate;
   },
 
   async getRunesMap() {
-    return runesMapStatic;
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/runes/map/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch runes map from Riot API");
+    }
+    const runesMap = await res.json();
+    return runesMap;
   },
 
   async getPlayerRuneHistory(puuid, limit) {
-    return Array.from({ length: limit }, (_, index) => makeRuneEntry(`${puuid}:history`, index));
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/runes/?limit=${limit}`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch player rune history from Riot API");
+    }
+    const runes = await res.json();
+    return [...runes.runes];
   },
 
   async getTimelineAvailability(matchId) {
-    if (hash(matchId) % 5 === 0) {
-      throw new MockApiError(
-        404,
-        "Timeline data not available for this match. Re-ingest with fetch_timeline=true.",
-      );
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/`);
+    if (!res.ok) {
+      if (res.status === 404) {
+        throw new MockApiError(
+          404,
+          "Timeline data not available for this match. Re-ingest with fetch_timeline=true."
+        );
+      }
+      throw new Error("Failed to fetch timeline availability from Riot API");
     }
-
-    const participants = makeMatchParticipants(matchId).map((entry) => entry.puuid);
-
-    return {
-      match_id: matchId,
-      frame_rows: randomInt(createRng(`${matchId}:timeline-frames`), 24, 42),
-      event_rows: randomInt(createRng(`${matchId}:timeline-events`), 90, 180),
-      frame_interval_ms: 60000,
-      participant_puuids: participants,
-    };
+    const timelineMeta = await res.json();
+    const matchDetails = await this.getMatch(matchId); // Ensure match details are loaded to get participant puuids
+    const participant_puuids = matchDetails.participants.map((p) => p.puuid);
+    return {...timelineMeta, participant_puuids};  
   },
 
   async getTimelineFramesByPuuid(matchId, puuid) {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/frames/by-puuid/${puuid}/`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch timeline frames from Riot API");
+    }
+    const frames = await res.json();
+    return frames;
     const rng = createRng(`${matchId}:${puuid}:frames`);
     let totalGold = randomInt(rng, 500, 900);
 
@@ -596,29 +583,36 @@ const frontendMvpClient: FrontendMvpClient = {
     });
   },
 
-  async getTimelineEvents(matchId, limit, cursor) {
-    const rng = createRng(`${matchId}:events`);
-    const totalEvents = 180;
-    const start = cursor ? Number(cursor) : 0;
-    const end = Math.min(start + limit, totalEvents);
+async getTimelineEvents(matchId, limit, cursor) {
+  const url =
+    `${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/events/?limit=${limit}` +
+    (cursor ? `&cursor=${cursor}` : "");
 
-    const events = Array.from({ length: end - start }, (_, localIndex) => {
-      const index = start + localIndex;
-      const eventType = pick(rng, TIMELINE_EVENT_TYPES);
+  const res = await fetch(url);
 
-      return {
-        id: `${matchId}-${index}`,
-        timestamp: index * 15000,
-        type: eventType,
-        detail: `${eventType} event payload ${randomInt(rng, 1000, 9999)}`,
-      };
-    });
+  if (!res.ok) {
+    throw new Error("Failed to fetch timeline events from Riot API");
+  }
 
-    return {
-      events,
-      next_cursor: end >= totalEvents ? null : String(end),
-    };
-  },
+  const data = await res.json();
+
+  return {
+    events: (data.events ?? []).map(
+      (event: {
+        event_id: number;
+        timestamp: number;
+        type: string;
+        detail: unknown;
+      }) => ({
+        id: String(event.event_id),
+        timestamp: event.timestamp,
+        type: event.type,
+        detail: event.detail,
+      })
+    ),
+    next_cursor: data.next_cursor ?? null,
+  };
+}
 };
 
 export { frontendMvpClient };
