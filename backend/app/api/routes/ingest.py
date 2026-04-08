@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List
 
 from app.db.session import get_db, SessionLocal
+from app.core.limiter import limiter
 from app.schemas.ingest import (
     IngestPlayerRequest,
     IngestPlayerResponse,
@@ -16,7 +17,8 @@ router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
 
 @router.post("/player", response_model=IngestPlayerResponse)
-async def ingest_player_route(payload: IngestPlayerRequest, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def ingest_player_route(request: Request, payload: IngestPlayerRequest, db: Session = Depends(get_db)):
     """
     Ingest a player and their match history from Riot API.
     
@@ -85,7 +87,9 @@ async def ingest_player_route(payload: IngestPlayerRequest, db: Session = Depend
 
 
 @router.post("/players/batch", response_model=BatchIngestResponse)
+@limiter.limit("3/minute")
 async def ingest_players_batch(
+    request: Request,
     players: List[IngestPlayerRequest],
 ) -> BatchIngestResponse:
     """

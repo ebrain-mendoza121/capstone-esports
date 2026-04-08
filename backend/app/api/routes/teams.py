@@ -8,6 +8,7 @@ POST /teams/matchup        → team vs team prediction with per-role breakdown
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.services.ddragon import get_champion_full_map
 from app.services.riot_live_service import get_team_stats, get_live_player_stats
 from app.services.ai_service import analyze_team_composition, role_matchup_breakdown, _load_model
 
@@ -28,14 +30,20 @@ router = APIRouter(prefix="/teams", tags=["teams"])
 # ---------------------------------------------------------------------------
 
 class PlayerInput(BaseModel):
-    game_name: str = Field(..., description="Riot ID game name, e.g. 'Faker'")
-    tag_line:  str = Field("NA1", description="Riot ID tag, e.g. 'NA1'")
-    role:      Optional[str] = Field(None, description="Expected role if known (TOP/JUNGLE/etc)")
+    game_name:    str           = Field(...,  description="Riot ID game name, e.g. 'Faker'")
+    tag_line:     str           = Field("NA1", description="Riot ID tag, e.g. 'NA1'")
+    role:         Optional[str] = Field(None, description="Expected lane role (TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY)")
+    champion_id:  Optional[int] = Field(None, description="DDragon numeric champion id (preferred)")
+    champion:     Optional[str] = Field(None, description="Champion display name — fallback if champion_id is unknown")
 
 
 class TeamBuildRequest(BaseModel):
-    players:  List[PlayerInput] = Field(..., min_length=1, max_length=5)
-    platform: str = Field("NA", description="Platform (NA, EUW, KR, …)")
+    players:           List[PlayerInput] = Field(..., min_length=1, max_length=5)
+    platform:          str               = Field("NA", description="Platform (NA, EUW, KR, …)")
+    composition_focus: Optional[str]    = Field(
+        None,
+        description="Desired comp style hint: teamfight / poke / dive / split / skirmish"
+    )
 
 
 class MatchupRequest(BaseModel):
@@ -146,6 +154,203 @@ def _aggregate_team(player_stats: list[dict]) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Champion + composition helpers
+# ---------------------------------------------------------------------------
+
+# Adjacent roles used to classify "flex" picks.
+# A champion is flex if its role_affinity doesn't include the declared role
+# but does include a role commonly played adjacent to it on the map.
+_FLEX_ADJACENCY: Dict[str, set] = {
+    "TOP":     {"JUNGLE"},
+    "JUNGLE":  {"TOP", "MIDDLE"},
+    "MIDDLE":  {"JUNGLE", "UTILITY"},
+    "BOTTOM":  set(),
+    "UTILITY": {"MIDDLE"},
+}
+
+
+def _role_champion_fit(champion_meta: Optional[Dict], declared_role: Optional[str]) -> str:
+    """
+    Classify how well a champion fits a declared lane role.
+
+    Returns:
+        "native"   — champion's role_affinity includes the declared role
+        "flex"     — affinity covers an adjacent role (common flex pick)
+        "off-meta" — no affinity match at all (unconventional pick)
+        "unknown"  — no champion or role data provided
+    """
+    if not champion_meta or not declared_role:
+        return "unknown"
+    role = declared_role.upper()
+    affinity: List[str] = champion_meta.get("role_affinity", [])
+    if role in affinity:
+        return "native"
+    if any(a in affinity for a in _FLEX_ADJACENCY.get(role, set())):
+        return "flex"
+    return "off-meta"
+
+
+# Ordered rules: first match wins.
+# Each entry is (archetype_label, predicate(tag_counter)).
+_ARCHETYPE_RULES: List[tuple] = [
+    ("skirmish-brawl", lambda t: t.get("Assassin", 0) >= 2),
+    ("poke-siege",     lambda t: t.get("Mage", 0) >= 3),
+    ("engage-dive",    lambda t: (t.get("Tank", 0) + t.get("Fighter", 0)) >= 3 and t.get("Tank", 0) >= 1),
+    ("split-push",     lambda t: t.get("Fighter", 0) >= 3),
+    ("teamfight",      lambda t: t.get("Tank", 0) >= 1 and t.get("Marksman", 0) >= 1 and t.get("Mage", 0) >= 1),
+]
+
+
+def _composition_archetype(player_slots: List[Dict]) -> str:
+    """
+    Derive the team composition archetype from champion tag frequencies.
+
+    player_slots: list of dicts, each with an optional "champion_meta" key.
+
+    Returns one of: skirmish-brawl, poke-siege, engage-dive, split-push,
+                    teamfight, balanced, unknown.
+    """
+    tag_counts: Counter = Counter()
+    for slot in player_slots:
+        meta = slot.get("champion_meta")
+        if meta:
+            tag_counts.update(meta.get("tags", []))
+
+    if not tag_counts:
+        return "unknown"
+
+    for name, test_fn in _ARCHETYPE_RULES:
+        if test_fn(tag_counts):
+            return name
+    return "balanced"
+
+
+def _synergy_flags(player_slots: List[Dict]) -> List[str]:
+    """
+    Identify notable synergies and composition gaps for a team.
+
+    player_slots: list of dicts, each with optional "champion_meta" and
+                  "role_champion_fit" keys.
+
+    Returns a list of human-readable strings — positive synergies first,
+    then risk/gap warnings.
+    """
+    flags: List[str] = []
+    tag_counts: Counter = Counter()
+    off_meta_count = 0
+
+    for slot in player_slots:
+        meta = slot.get("champion_meta")
+        if meta:
+            tag_counts.update(meta.get("tags", []))
+        if slot.get("role_champion_fit") == "off-meta":
+            off_meta_count += 1
+
+    if not tag_counts:
+        return flags
+
+    # ── Positive synergies ──────────────────────────────────────────────────
+    if tag_counts.get("Tank", 0) + tag_counts.get("Fighter", 0) >= 3:
+        flags.append("Strong frontline — multiple tanks/fighters enable deep dives and zone control")
+
+    if tag_counts.get("Mage", 0) >= 2:
+        flags.append("Multiple mages — sustained AoE poke and teamfight damage")
+
+    if tag_counts.get("Assassin", 0) >= 2:
+        flags.append("Dual assassin burst — high pick potential, but requires leads to function")
+
+    if tag_counts.get("Support", 0) >= 1 and tag_counts.get("Tank", 0) >= 1:
+        flags.append("Engage + peel coverage — can both initiate and protect carries")
+
+    # ── Gaps / risks ────────────────────────────────────────────────────────
+    if tag_counts.get("Marksman", 0) == 0:
+        flags.append("No marksman — sustained physical DPS source missing, consider ADC alternative")
+
+    if tag_counts.get("Mage", 0) == 0 and tag_counts.get("Assassin", 0) == 0:
+        flags.append("No magic damage — enemy can itemise pure armor and nullify team damage")
+
+    if tag_counts.get("Support", 0) == 0:
+        flags.append("No dedicated support — vision control and carry peel may be lacking")
+
+    if tag_counts.get("Tank", 0) == 0 and tag_counts.get("Fighter", 0) == 0:
+        flags.append("No frontline — team is vulnerable to engage and hard to siege objectives")
+
+    # ── Pick quality ─────────────────────────────────────────────────────────
+    if off_meta_count == 1:
+        flags.append("1 off-meta pick — unconventional selection may create surprise value or expose a weak lane")
+    elif off_meta_count >= 2:
+        flags.append(
+            f"{off_meta_count} off-meta picks — high-variance composition, requires strong individual performance"
+        )
+
+    return flags
+
+
+async def _resolve_champion_slots(
+    player_inputs: List[PlayerInput],
+    player_stats:  List[Dict],
+) -> List[Dict]:
+    """
+    Resolve champion metadata and role fit for each player slot.
+
+    Loads DDragon full map only when at least one PlayerInput has champion data.
+    Returns a list parallel to player_inputs, each dict containing:
+        champion_meta     — full metadata or None
+        role              — resolved role string or None
+        role_champion_fit — "native" | "flex" | "off-meta" | "unknown"
+    """
+    has_champion_data = any(p.champion_id or p.champion for p in player_inputs)
+    champ_full_map: Dict[int, Any] = {}
+    if has_champion_data:
+        champ_full_map = await get_champion_full_map()
+
+    slots: List[Dict] = []
+    for i, p_input in enumerate(player_inputs):
+        p_stat = player_stats[i] if i < len(player_stats) else {}
+
+        # Resolve champion meta — id takes priority, name is fallback
+        champ_meta: Optional[Dict] = None
+        if p_input.champion_id and p_input.champion_id in champ_full_map:
+            raw = champ_full_map[p_input.champion_id]
+            champ_meta = {
+                "id":           raw["id"],
+                "name":         raw["name"],
+                "title":        raw["title"],
+                "tags":         raw["tags"],
+                "image_url":    raw["image_url"],
+                "role_affinity":raw["role_affinity"],
+            }
+        elif p_input.champion and champ_full_map:
+            # Name lookup — case-insensitive
+            name_lower = p_input.champion.strip().lower()
+            for raw in champ_full_map.values():
+                if raw["name"].lower() == name_lower:
+                    champ_meta = {
+                        "id":           raw["id"],
+                        "name":         raw["name"],
+                        "title":        raw["title"],
+                        "tags":         raw["tags"],
+                        "image_url":    raw["image_url"],
+                        "role_affinity":raw["role_affinity"],
+                    }
+                    break
+
+        # Resolve role: declared > primary from stats
+        resolved_role = (
+            p_input.role.upper() if p_input.role
+            else str(p_stat.get("primary_role") or "").upper() or None
+        )
+
+        slots.append({
+            "champion_meta":     champ_meta,
+            "role":              resolved_role,
+            "role_champion_fit": _role_champion_fit(champ_meta, resolved_role),
+        })
+
+    return slots
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 
@@ -171,32 +376,42 @@ async def build_team(
 
     player_stats = await get_team_stats(player_inputs, platform=body.platform, db=db)
 
-    # Attach declared role if provided
+    # Attach declared role if provided (needed by _team_gaps and AI analysis)
     for i, pstat in enumerate(player_stats):
         declared = body.players[i].role
         if declared:
             pstat["declared_role"] = declared.upper()
+
+    # Resolve champion metadata + role fit for every slot
+    player_slots = await _resolve_champion_slots(body.players, player_stats)
 
     team_agg    = _aggregate_team(player_stats)
     gaps        = _team_gaps(player_stats)
     strengths   = _team_strengths(player_stats)
     ai_analysis = analyze_team_composition(db, player_stats)
 
-    # Per-player summary with confidence label
+    composition_archetype = _composition_archetype(player_slots)
+    synergy_flags         = _synergy_flags(player_slots)
+
+    # Per-player summary with confidence label + champion enrichment
     players_out = []
-    for p in player_stats:
+    for i, p in enumerate(player_stats):
         games = int(p.get("games_in_window", 0))
         confidence = (
             "high"   if games >= 15 else
             "medium" if games >= 5  else
             "low"
         )
+        slot = player_slots[i]
         players_out.append({
             "summoner_name":         p.get("summoner_name"),
             "puuid":                 p.get("puuid"),
             "source":                p.get("source", "unknown"),
             "primary_role":          p.get("primary_role"),
             "declared_role":         p.get("declared_role"),
+            # Champion selection (null when not provided by caller)
+            "champion_meta":         slot["champion_meta"],
+            "role_champion_fit":     slot["role_champion_fit"],
             "games_in_window":       games,
             "confidence":            confidence,
             "win_rate_20":           p.get("win_rate_20"),
@@ -209,14 +424,19 @@ async def build_team(
         })
 
     return {
-        "platform":        body.platform,
-        "players":         players_out,
-        "team_stats":      team_agg,
-        "strengths":       strengths,
-        "gaps":            gaps,
-        "team_dna":        ai_analysis["team_dna"],
-        "threat_scores":   ai_analysis["threat_scores"],
-        "predicted_carry": ai_analysis["predicted_carry"],
+        "platform":             body.platform,
+        "composition_focus":    body.composition_focus,
+        "players":              players_out,
+        "team_stats":           team_agg,
+        "strengths":            strengths,
+        "gaps":                 gaps,
+        # Composition analysis (populated when champion data is provided)
+        "composition_archetype": composition_archetype,
+        "synergy_flags":         synergy_flags,
+        # AI analysis
+        "team_dna":              ai_analysis["team_dna"],
+        "threat_scores":         ai_analysis["threat_scores"],
+        "predicted_carry":       ai_analysis["predicted_carry"],
     }
 
 
@@ -249,6 +469,12 @@ async def predict_matchup(
     for i, p in enumerate(body.red_team):
         if p.role:
             red_stats[i]["declared_role"] = p.role.upper()
+
+    # Resolve champion metadata + role fit for both teams (single DDragon cache hit)
+    blue_slots, red_slots = await _asyncio.gather(
+        _resolve_champion_slots(body.blue_team, blue_stats),
+        _resolve_champion_slots(body.red_team,  red_stats),
+    )
 
     blue_agg = _aggregate_team(blue_stats)
     red_agg  = _aggregate_team(red_stats)
@@ -341,25 +567,28 @@ async def predict_matchup(
     red_win_prob = round(1.0 - blue_win_prob, 4)
 
     # --- Per-role matchup breakdown ---
-    def _player_row(pstat: dict, declared_role: Optional[str]) -> dict:
+    def _player_row(pstat: dict, declared_role: Optional[str], slot: dict) -> dict:
         games = int(pstat.get("games_in_window", 0))
         return {
-            "summoner_name":  pstat.get("summoner_name"),
-            "source":         pstat.get("source", "unknown"),
-            "role":           declared_role or pstat.get("primary_role"),
-            "games":          games,
-            "confidence":     "high" if games >= 15 else "medium" if games >= 5 else "low",
-            "win_rate_20":    pstat.get("win_rate_20"),
-            "avg_kda_20":     pstat.get("avg_kda_20"),
-            "avg_cs_per_min": pstat.get("avg_cs_per_min_20"),
+            "summoner_name":     pstat.get("summoner_name"),
+            "source":            pstat.get("source", "unknown"),
+            "role":              declared_role or pstat.get("primary_role"),
+            "games":             games,
+            "confidence":        "high" if games >= 15 else "medium" if games >= 5 else "low",
+            "win_rate_20":       pstat.get("win_rate_20"),
+            "avg_kda_20":        pstat.get("avg_kda_20"),
+            "avg_cs_per_min":    pstat.get("avg_cs_per_min_20"),
+            # Champion enrichment (null when no champion data was provided)
+            "champion_meta":     slot["champion_meta"],
+            "role_champion_fit": slot["role_champion_fit"],
         }
 
     blue_players_out = [
-        _player_row(s, body.blue_team[i].role)
+        _player_row(s, body.blue_team[i].role, blue_slots[i])
         for i, s in enumerate(blue_stats)
     ]
     red_players_out = [
-        _player_row(s, body.red_team[i].role)
+        _player_row(s, body.red_team[i].role, red_slots[i])
         for i, s in enumerate(red_stats)
     ]
 
@@ -385,6 +614,12 @@ async def predict_matchup(
     blue_ai = analyze_team_composition(db, blue_stats)
     red_ai  = analyze_team_composition(db, red_stats)
 
+    # --- Composition archetype + synergy for both teams ---
+    blue_archetype = _composition_archetype(blue_slots)
+    red_archetype  = _composition_archetype(red_slots)
+    blue_synergy   = _synergy_flags(blue_slots)
+    red_synergy    = _synergy_flags(red_slots)
+
     # --- Role matchup breakdown ---
     role_matchups = role_matchup_breakdown(blue_stats, red_stats)
 
@@ -405,20 +640,24 @@ async def predict_matchup(
             "even_lanes":         even_lanes,
         },
         "blue_team": {
-            "players":         blue_players_out,
-            "team_stats":      blue_agg,
-            "gaps":            blue_gaps,
-            "team_dna":        blue_ai["team_dna"],
-            "threat_scores":   blue_ai["threat_scores"],
-            "predicted_carry": blue_ai["predicted_carry"],
+            "players":               blue_players_out,
+            "team_stats":            blue_agg,
+            "gaps":                  blue_gaps,
+            "composition_archetype": blue_archetype,
+            "synergy_flags":         blue_synergy,
+            "team_dna":              blue_ai["team_dna"],
+            "threat_scores":         blue_ai["threat_scores"],
+            "predicted_carry":       blue_ai["predicted_carry"],
         },
         "red_team": {
-            "players":         red_players_out,
-            "team_stats":      red_agg,
-            "gaps":            red_gaps,
-            "team_dna":        red_ai["team_dna"],
-            "threat_scores":   red_ai["threat_scores"],
-            "predicted_carry": red_ai["predicted_carry"],
+            "players":               red_players_out,
+            "team_stats":            red_agg,
+            "gaps":                  red_gaps,
+            "composition_archetype": red_archetype,
+            "synergy_flags":         red_synergy,
+            "team_dna":              red_ai["team_dna"],
+            "threat_scores":         red_ai["threat_scores"],
+            "predicted_carry":       red_ai["predicted_carry"],
         },
         "key_advantages": advantages,
     }

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import traceback
 from contextlib import asynccontextmanager
@@ -5,6 +6,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from app.core.limiter import limiter  # noqa: F401 — re-exported for backwards compat
 from sqlalchemy import text
 
 from app.api.router import api_router
@@ -27,6 +31,7 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+
 # ---------------------------------------------------------------------------
 # Lifespan — replaces deprecated @app.on_event("startup")
 # ---------------------------------------------------------------------------
@@ -35,11 +40,15 @@ settings = get_settings()
 async def _lifespan(app: FastAPI):  # noqa: ARG001
     """Pre-warm Data Dragon caches on startup so first requests pay no I/O cost."""
     try:
-        from app.services.ddragon import get_champion_map, get_rune_map
-        champ_map = await get_champion_map()
+        # Load full champion map (metadata + image URLs + role affinity) so that
+        # /champions endpoints and team builder serve requests instantly.
+        # get_champion_full_map() also populates the simple _champion_map cache,
+        # so callers of get_champion_map() benefit too.
+        from app.services.ddragon import get_champion_full_map, get_rune_map
+        champ_map = await get_champion_full_map()
         rune_map  = await get_rune_map()
         logger.info(
-            "DDragon caches ready: %d champions, %d rune entries",
+            "DDragon caches ready: %d champions (full metadata), %d rune entries",
             len(champ_map),
             len(rune_map),
         )
@@ -51,6 +60,10 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
 
 app = FastAPI(title="Esports Analytics API", version="0.1.0", lifespan=_lifespan)
 
+# Attach rate limiter state and its 429 handler.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -58,6 +71,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Request timeout middleware — kills any request that takes longer than 60s.
+# Prevents slow/hung Riot API calls from blocking workers indefinitely.
+# Returns 504 so callers know to retry rather than wait forever.
+# ---------------------------------------------------------------------------
+@app.middleware("http")
+async def _timeout_middleware(request: Request, call_next):
+    try:
+        return await asyncio.wait_for(call_next(request), timeout=60.0)
+    except asyncio.TimeoutError:
+        logger.error(
+            "Request timed out after 60s: %s %s",
+            request.method,
+            request.url.path,
+        )
+        return JSONResponse(
+            status_code=504,
+            content={
+                "error": "RequestTimeout",
+                "message": "The request took too long and was cancelled.",
+                "path": request.url.path,
+            },
+        )
+
 
 app.include_router(health_router)
 app.include_router(api_router)

@@ -28,16 +28,20 @@ router = APIRouter(prefix="/backfill", tags=["backfill"])
 
 
 @router.post("/derived")
-async def backfill_derived_metrics(
+def backfill_derived_metrics(
     puuid: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """
     Backfill derived metrics for matches that are missing them.
     Pass `puuid` to limit to a single player; omit to run globally.
+
+    Computes entirely from data already stored in participant_stats and
+    matches — no Riot API calls are made, so there is no rate-limit risk.
     """
+    # Find all (match_id, player_id, puuid) combos missing a derived_metrics row.
     query = (
-        db.query(Match.match_id, ParticipantStats.player_id, Player.puuid, Player.region)
+        db.query(Match.match_id, Match.game_duration, ParticipantStats.player_id, Player.puuid)
         .join(ParticipantStats, ParticipantStats.match_id == Match.match_id)
         .join(Player, Player.id == ParticipantStats.player_id)
         .outerjoin(
@@ -62,29 +66,51 @@ async def backfill_derived_metrics(
             "failed_matches": [],
         }
 
-    client = RiotClient()
     processed = 0
     failed = 0
     failed_matches = []
 
-    for match_id, player_id, player_puuid, player_routing in missing_records:
+    for match_id, game_duration_seconds, player_id, player_puuid in missing_records:
         try:
-            match_json = await client.get_match(match_id, player_routing)
-            info = match_json["info"]
-            game_duration_seconds = normalize_game_duration(info)
-            all_participants = info.get("participants", [])
-
-            participant = next(
-                (p for p in all_participants if p.get("puuid") == player_puuid), None
+            # Load all participant_stats rows for this match so we can compute
+            # team-level aggregates (team kills, team damage) without Riot API.
+            all_ps = (
+                db.query(ParticipantStats)
+                .filter(ParticipantStats.match_id == match_id)
+                .all()
             )
-            if not participant:
+
+            target = next((p for p in all_ps if p.player_id == player_id), None)
+            if not target:
                 failed += 1
-                failed_matches.append(match_id)
+                failed_matches.append(f"{match_id}: player_id {player_id} not in participant_stats")
                 continue
 
-            team_id = participant.get("teamId", 0)
-            team_participants = extract_team_participants(all_participants, team_id)
-            metrics = compute_derived_metrics(participant, team_participants, game_duration_seconds)
+            # Build lightweight dicts matching compute_derived_metrics expectations.
+            def _ps_to_dict(ps: ParticipantStats) -> dict:
+                return {
+                    "kills":                        ps.kills or 0,
+                    "deaths":                       ps.deaths or 0,
+                    "assists":                      ps.assists or 0,
+                    "goldEarned":                   ps.gold_earned or 0,
+                    "totalDamageDealtToChampions":  ps.total_damage or 0,
+                    "visionScore":                  ps.vision_score or 0,
+                    "totalMinionsKilled":           ps.total_minions_killed or 0,
+                    "neutralMinionsKilled":         ps.neutral_minions_killed or 0,
+                    "teamId":                       ps.team_id or 0,
+                    # Role fields — stored on participant_stats
+                    "teamPosition":                 ps.role,
+                }
+
+            participant_dict = _ps_to_dict(target)
+            team_id = target.team_id or 0
+            team_dicts = [_ps_to_dict(p) for p in all_ps if (p.team_id or 0) == team_id]
+
+            metrics = compute_derived_metrics(
+                participant_dict,
+                team_dicts,
+                game_duration_seconds or 0,
+            )
 
             stmt = insert(DerivedMetrics).values(
                 match_id=match_id,

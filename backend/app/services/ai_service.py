@@ -2217,14 +2217,29 @@ def analyze_team_composition(
     Each dict must have: puuid, summoner_name, win_rate_20, avg_kda_20,
     avg_cs_per_min_20, games_in_window.
 
+    Optional per-player keys (activate Phase-3 role-aware scoring):
+      champion_id    — Riot numeric champion id
+      champion_meta  — ChampionMeta dict from ddragon.get_champion_full_map()
+      declared_role  — explicit role string for this draft slot
+      avg_role_norm_kda_20 — rolling role-normalised KDA z-score (from
+                             feature_extractor rolling window)
+
     Returns:
-        team_dna    — archetype label + tagline
-        threat_scores — per-player 0–10 threat rating
-        predicted_carry — the player profile most likely to carry
+        team_dna          — archetype label + tagline
+        threat_scores     — per-player 0–10 threat rating
+        predicted_carry   — the player profile most likely to carry
+        composition_archetype — Phase-3 comp style (present when champion
+                                data is available for 3+ slots)
+        role_fit_scores   — per-slot fit_score + fit_label (when
+                            champion_meta and role are provided)
     """
     playstyle_labels: list[str] = []
     threat_scores: list[dict] = []
     carry_candidates: list[dict] = []
+
+    # Phase-3 accumulation
+    phase3_slots: list[dict] = []          # {champion_meta, role}
+    role_fit_entries: list[dict] = []      # per-slot fit results
 
     # Pull model-backed weights once for the whole team.
     # Falls back to (4.0, 4.0) if the model is untrained or AUC < 0.60.
@@ -2240,7 +2255,16 @@ def analyze_team_composition(
         kda    = float(p.get("avg_kda_20")        or 2.5)
         cs     = float(p.get("avg_cs_per_min_20") or 7.0)
         games  = int(p.get("games_in_window")     or 0)
-        role   = str(p.get("primary_role")        or "")
+        role   = str(p.get("declared_role") or p.get("primary_role") or "")
+
+        # --- Phase-3: use role-normalised KDA as primary ranking signal when
+        #     role is declared.  Falls back to raw avg_kda_20. ---
+        role_norm_kda = p.get("avg_role_norm_kda_20")
+        effective_kda = (
+            float(role_norm_kda) + 2.5   # shift z-score to positive domain
+            if role and role_norm_kda is not None
+            else kda
+        )
 
         # --- Playstyle from AI model ---
         ps_label = "unknown"
@@ -2252,9 +2276,25 @@ def analyze_team_composition(
                 pass
         playstyle_labels.append(ps_label)
 
-        # --- Threat score ---
-        threat = _compute_threat_score(wr, kda, games, wr_w, kda_w)
-        threat_scores.append({
+        # --- Phase-3: champion role fit ---
+        champion_meta = p.get("champion_meta")
+        fit_result: dict = {}
+        if champion_meta and role:
+            fit_result = analyze_role_champion_fit(champion_meta, role)
+            role_fit_entries.append({
+                "summoner_name": name,
+                "champion_id":   champion_meta.get("id"),
+                "champion_name": champion_meta.get("name"),
+                "role":          role,
+                **fit_result,
+            })
+            phase3_slots.append({"champion_meta": champion_meta, "role": role})
+        elif champion_meta:
+            phase3_slots.append({"champion_meta": champion_meta, "role": ""})
+
+        # --- Threat score (effective KDA incorporates role-norm signal) ---
+        threat = _compute_threat_score(wr, effective_kda, games, wr_w, kda_w)
+        threat_entry: dict = {
             "summoner_name":  name,
             "threat_score":   threat,
             "role":           role or None,
@@ -2263,22 +2303,32 @@ def analyze_team_composition(
             "avg_kda_20":     round(kda, 3),
             "games":          games,
             "weight_source":  weight_source,
-        })
+        }
+        if fit_result:
+            threat_entry["role_fit_score"] = fit_result["fit_score"]
+            threat_entry["role_fit_label"] = fit_result["fit_label"]
+        if role_norm_kda is not None and role:
+            threat_entry["avg_role_norm_kda_20"] = round(float(role_norm_kda), 3)
+            threat_entry["kda_signal"] = "role_normalised"
+        threat_scores.append(threat_entry)
 
-        # --- Carry score: win rate + KDA + CS weighted for carry potential ---
+        # --- Carry score: when role signal is available, weight it higher ---
         carry_score = (
-            min(wr, 1.0)         * 0.40
-            + min(kda / 8.0, 1.0)  * 0.35
-            + min(cs  / 9.0, 1.0)  * 0.25
+            min(wr, 1.0)                   * 0.40
+            + min(effective_kda / 8.0, 1.0) * 0.35
+            + min(cs / 9.0, 1.0)            * 0.25
         )
+        # Boost carry score for native-fit carries; penalise off-meta
+        if fit_result:
+            carry_score += (fit_result["fit_score"] - 0.5) * 0.05
         carry_candidates.append({
-            "summoner_name": name,
-            "carry_score":   round(carry_score, 4),
-            "win_rate_20":   round(wr, 3),
-            "avg_kda_20":    round(kda, 3),
+            "summoner_name":     name,
+            "carry_score":       round(carry_score, 4),
+            "win_rate_20":       round(wr, 3),
+            "avg_kda_20":        round(kda, 3),
             "avg_cs_per_min_20": round(cs, 3),
-            "role":          role or None,
-            "playstyle":     ps_label,
+            "role":              role or None,
+            "playstyle":         ps_label,
         })
 
     # Sort by threat descending
@@ -2287,10 +2337,24 @@ def analyze_team_composition(
     # Predicted carry = highest carry score
     predicted_carry = max(carry_candidates, key=lambda x: x["carry_score"]) if carry_candidates else None
 
-    return {
-        "team_dna":        _team_dna(playstyle_labels),
-        "threat_scores":   threat_scores,
-        "predicted_carry": predicted_carry,
+    # --- Phase-3: composition archetype (requires 3+ slots with champion data) ---
+    comp_archetype: Optional[dict] = None
+    if len(phase3_slots) >= 3:
+        comp_archetype = score_composition_archetype(phase3_slots)
+
+    # Build team_dna; if composition archetype is available, incorporate its
+    # signal into the tagline / breakdown.
+    dna = _team_dna(playstyle_labels)
+    if comp_archetype:
+        dna["composition_archetype"]  = comp_archetype["archetype"]
+        dna["composition_description"] = comp_archetype["description"]
+        dna["composition_tag_counts"] = comp_archetype["tag_counts"]
+        dna["role_fit_avg"]           = comp_archetype["role_fit_avg"]
+
+    result: dict = {
+        "team_dna":             dna,
+        "threat_scores":        threat_scores,
+        "predicted_carry":      predicted_carry,
         "threat_weight_source": weight_source,
         "threat_weights": {
             "win_rate_weight": wr_w,
@@ -2298,6 +2362,12 @@ def analyze_team_composition(
             "model_auc":       weights.get("model_auc"),
         },
     }
+    if role_fit_entries:
+        result["role_fit_scores"] = role_fit_entries
+    if comp_archetype:
+        result["composition_archetype"] = comp_archetype
+
+    return result
 
 
 def role_matchup_breakdown(
@@ -2316,6 +2386,12 @@ def role_matchup_breakdown(
     teams have a player for the same role, they get a head-to-head card.
     Players whose role doesn't match anyone on the other side appear as
     "No opponent" entries so the caller always gets the full picture.
+
+    Phase-4 enhancements (activated when avg_role_norm_kda_20 is present):
+      - KDA comparison uses the role-normalised z-score so a 3.0 KDA Support
+        and a 3.0 KDA ADC are not treated as equivalent.
+      - Each card gains a ``role_context`` block with per-side σ descriptions,
+        e.g. "Blue TOP is 0.8 σ above average KDA for TOP laners".
     """
     _ROLE_ORDER = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
 
@@ -2324,6 +2400,31 @@ def role_matchup_breakdown(
             str(p.get("declared_role") or "").upper()
             or str(p.get("primary_role") or "").upper()
             or "UNASSIGNED"
+        )
+
+    # --- Phase-4 helpers ---
+
+    def _sigma_phrase(z: float) -> str:
+        """Convert a KDA z-score to a plain-English performance phrase."""
+        if z >= 1.5:
+            return "significantly above average"
+        if z >= 0.5:
+            return "above average"
+        if z >= -0.5:
+            return "near average"
+        if z >= -1.5:
+            return "below average"
+        return "significantly below average"
+
+    def _role_context_note(side: str, role: str, name: Optional[str], z: float) -> str:
+        """Build the interpretive sentence for one player's role-normalised KDA."""
+        player_label = name or side
+        direction = "above" if z >= 0 else "below"
+        abs_z = abs(round(z, 2))
+        phrase = _sigma_phrase(z)
+        return (
+            f"{player_label} ({side} {role}) is {phrase} — "
+            f"{abs_z} σ {direction} average KDA for {role} laners"
         )
 
     def _edge(b_val: float, r_val: float, label: str) -> dict:
@@ -2345,6 +2446,29 @@ def role_matchup_breakdown(
             "pct_diff": round(pct, 1),
         }
 
+    def _sigma_edge(b_z: float, r_z: float) -> dict:
+        """
+        Edge dict for role-normalised KDA (z-score scale).
+        Uses a 0.2 σ dead-zone instead of a percentage band since z-scores
+        are already on a common scale across all roles.
+        """
+        delta = b_z - r_z
+        if abs(delta) < 0.2:
+            winner = "even"
+        elif delta > 0:
+            winner = "blue"
+        else:
+            winner = "red"
+        return {
+            "metric":  "role_norm_kda",
+            "winner":  winner,
+            "blue":    round(b_z, 3),
+            "red":     round(r_z, 3),
+            "delta":   round(abs(delta), 3),
+            # express advantage as σ difference — more meaningful than %
+            "sigma_diff": round(abs(delta), 3),
+        }
+
     def _matchup_card(role: str, b: Optional[dict], r: Optional[dict]) -> dict:
         """Build one role matchup card. b or r may be None if unmatched."""
         b_wr  = float(b.get("win_rate_20")       or 0.5) if b else 0.5
@@ -2354,13 +2478,29 @@ def role_matchup_breakdown(
         b_cs  = float(b.get("avg_cs_per_min_20") or 7.0) if b else 7.0
         r_cs  = float(r.get("avg_cs_per_min_20") or 7.0) if r else 7.0
 
+        # Phase-4: role-normalised KDA z-score (None when not provided)
+        b_znorm = b.get("avg_role_norm_kda_20") if b else None
+        r_znorm = r.get("avg_role_norm_kda_20") if r else None
+        b_znorm = float(b_znorm) if b_znorm is not None else None
+        r_znorm = float(r_znorm) if r_znorm is not None else None
+
+        # Use z-score for composite if both sides have it; fall back to raw KDA
+        have_znorm = b_znorm is not None and r_znorm is not None
+        if have_znorm:
+            # Map z-score (-3..+3) to 0..1 probability-like scale for composite
+            b_kda_norm = max(min((b_znorm + 3) / 6, 1.0), 0.0)
+            r_kda_norm = max(min((r_znorm + 3) / 6, 1.0), 0.0)
+        else:
+            b_kda_norm = min(b_kda / 8, 1.0)
+            r_kda_norm = min(r_kda / 8, 1.0)
+
         if b is None:
             overall_edge, edge_label = "red",  "RED — no opponent"
         elif r is None:
             overall_edge, edge_label = "blue", "BLUE — no opponent"
         else:
-            b_composite = b_wr * 0.45 + min(b_kda / 8, 1) * 0.35 + min(b_cs / 9, 1) * 0.20
-            r_composite = r_wr * 0.45 + min(r_kda / 8, 1) * 0.35 + min(r_cs / 9, 1) * 0.20
+            b_composite = b_wr * 0.45 + b_kda_norm * 0.35 + min(b_cs / 9, 1) * 0.20
+            r_composite = r_wr * 0.45 + r_kda_norm * 0.35 + min(r_cs / 9, 1) * 0.20
             pct = abs(b_composite - r_composite) / max((b_composite + r_composite) / 2, 0.001) * 100
             if pct < 4:
                 overall_edge, edge_label = "even", "EVEN"
@@ -2371,16 +2511,45 @@ def role_matchup_breakdown(
                 overall_edge = "red"
                 edge_label   = f"RED +{round(pct, 0):.0f}%"
 
-        return {
+        b_name = b.get("summoner_name") if b else None
+        r_name = r.get("summoner_name") if r else None
+
+        card: dict = {
             "role":         role,
-            "blue_player":  b.get("summoner_name") if b else None,
-            "red_player":   r.get("summoner_name") if r else None,
+            "blue_player":  b_name,
+            "red_player":   r_name,
             "overall_edge": overall_edge,
             "edge_label":   edge_label,
-            "win_rate":     _edge(b_wr,  r_wr,  "win_rate"),
+            "win_rate":     _edge(b_wr, r_wr, "win_rate"),
             "kda":          _edge(b_kda, r_kda, "kda"),
-            "cs_per_min":   _edge(b_cs,  r_cs,  "cs_per_min"),
+            "cs_per_min":   _edge(b_cs, r_cs, "cs_per_min"),
         }
+
+        # Phase-4: include role-normalised KDA comparison and context notes
+        if have_znorm:
+            card["role_norm_kda"] = _sigma_edge(b_znorm, r_znorm)
+            card["kda_metric_used"] = "role_normalised"
+            card["role_context"] = {
+                "blue": _role_context_note("Blue", role, b_name, b_znorm),
+                "red":  _role_context_note("Red",  role, r_name, r_znorm),
+                "blue_sigma": round(b_znorm, 3),
+                "red_sigma":  round(r_znorm, 3),
+            }
+        elif b_znorm is not None or r_znorm is not None:
+            # Only one side has the value — still emit individual context notes
+            card["kda_metric_used"] = "mixed"
+            ctx: dict = {}
+            if b_znorm is not None:
+                ctx["blue"] = _role_context_note("Blue", role, b_name, b_znorm)
+                ctx["blue_sigma"] = round(b_znorm, 3)
+            if r_znorm is not None:
+                ctx["red"] = _role_context_note("Red", role, r_name, r_znorm)
+                ctx["red_sigma"] = round(r_znorm, 3)
+            card["role_context"] = ctx
+        else:
+            card["kda_metric_used"] = "raw"
+
+        return card
 
     # Build role → player dict for each team (last write wins if duplicate roles)
     blue_by_role: dict[str, dict] = {}
@@ -2553,4 +2722,289 @@ def train_matchup_predictor(db: Session) -> dict:
         "top_factors": artifact["top_factors"],
         "lr_auc":      round(lr_auc, 4),
         "xgb_auc":     round(xgb_auc, 4),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Role-Aware AI Layer
+# ---------------------------------------------------------------------------
+
+# Adjacent roles used for flex-pick detection in analyze_role_champion_fit.
+# A champion that cannot natively play the declared role but can play an
+# adjacent one is classified as a "flex" pick (score 0.5) rather than
+# off-meta (score 0.1).
+_ADJACENT_ROLES: dict[str, list[str]] = {
+    "TOP":     ["JUNGLE", "MIDDLE"],
+    "JUNGLE":  ["TOP", "MIDDLE"],
+    "MIDDLE":  ["TOP", "JUNGLE", "UTILITY"],
+    "BOTTOM":  ["MIDDLE"],
+    "UTILITY": ["MIDDLE", "BOTTOM"],
+}
+
+# Composition archetype definitions — ordered by precedence.
+# Each entry: (archetype_name, condition_fn(tag_counts, role_slots))
+# tag_counts: {tag: count}  role_slots: list of {champion_meta, role} dicts
+_COMP_TAG_ARCHETYPES: list[tuple[str, str]] = [
+    # Label          Description
+    ("poke",         "Long-range poke/siege — win through attrition"),
+    ("engage-dive",  "Engage into backline — blow up the enemy team"),
+    ("teamfight",    "Sustained teamfight damage and CC"),
+    ("protect-carry","Peel and disengage around one damage threat"),
+    ("skirmish-brawl","Small-fight specialists — punish isolated picks"),
+    ("split-push",   "1-3-1 or 1-4 split pressure to force reactions"),
+    ("balanced",     "Mixed archetype — flexible win conditions"),
+]
+
+
+def get_champion_role_stats(
+    db: Session,
+    champion_id: int,
+    role: str,
+) -> dict:
+    """
+    Aggregate participant_stats for a champion filtered by role.
+
+    Joins participant_stats → players → derived_metrics to compute:
+      win_rate, avg_kda, avg_cs_per_min, avg_gold_per_min,
+      avg_damage_share, games_played.
+
+    The role filter is case-insensitive and applied to
+    participant_stats.role.
+
+    Returns a dict with the above keys, or games_played=0 if no data.
+    """
+    sql = text("""
+        SELECT
+            COUNT(*)                        AS games_played,
+            AVG(CASE WHEN ps.win THEN 1.0 ELSE 0.0 END)
+                                            AS win_rate,
+            AVG(dm.kda)                     AS avg_kda,
+            AVG(dm.cs_per_min)              AS avg_cs_per_min,
+            AVG(dm.gold_per_min)            AS avg_gold_per_min,
+            AVG(dm.damage_share)            AS avg_damage_share
+        FROM participant_stats ps
+        JOIN players p
+          ON p.id = ps.player_id
+        JOIN derived_metrics dm
+          ON dm.match_id = ps.match_id AND dm.puuid = p.puuid
+        WHERE ps.champion_id = :champion_id
+          AND UPPER(ps.role)  = UPPER(:role)
+    """)
+    row = db.execute(sql, {"champion_id": champion_id, "role": role}).mappings().first()
+
+    if row is None or row["games_played"] == 0:
+        return {
+            "champion_id":    champion_id,
+            "role":           role.upper(),
+            "games_played":   0,
+            "win_rate":       None,
+            "avg_kda":        None,
+            "avg_cs_per_min": None,
+            "avg_gold_per_min": None,
+            "avg_damage_share": None,
+        }
+
+    return {
+        "champion_id":      champion_id,
+        "role":             role.upper(),
+        "games_played":     int(row["games_played"]),
+        "win_rate":         round(float(row["win_rate"]), 4)        if row["win_rate"]        is not None else None,
+        "avg_kda":          round(float(row["avg_kda"]), 3)         if row["avg_kda"]         is not None else None,
+        "avg_cs_per_min":   round(float(row["avg_cs_per_min"]), 3)  if row["avg_cs_per_min"]  is not None else None,
+        "avg_gold_per_min": round(float(row["avg_gold_per_min"]), 3) if row["avg_gold_per_min"] is not None else None,
+        "avg_damage_share": round(float(row["avg_damage_share"]), 4) if row["avg_damage_share"] is not None else None,
+    }
+
+
+def analyze_role_champion_fit(
+    champion_meta: dict,
+    declared_role: str,
+) -> dict:
+    """
+    Score how well a champion fits a declared role.
+
+    Uses role_affinity from ChampionMeta (populated by ddragon.py) which
+    maps DDragon tags → LoL roles via _TAG_ROLE_AFFINITY.
+
+    Scoring:
+      1.0  "native"   — declared_role is in champion_meta["role_affinity"]
+      0.5  "flex"     — declared_role is adjacent to a native role
+      0.1  "off-meta" — no recognised affinity
+
+    Args:
+        champion_meta: ChampionMeta dict from get_champion_full_map().
+        declared_role: Role string, e.g. "TOP", "JUNGLE", "MIDDLE",
+                       "BOTTOM", "UTILITY".
+
+    Returns:
+        {"fit_score": float, "fit_label": str, "role_affinity": list[str]}
+    """
+    role_up = declared_role.upper()
+    affinity: list[str] = [r.upper() for r in (champion_meta.get("role_affinity") or [])]
+
+    if role_up in affinity:
+        return {"fit_score": 1.0, "fit_label": "native", "role_affinity": affinity}
+
+    adjacent = _ADJACENT_ROLES.get(role_up, [])
+    if any(adj in affinity for adj in adjacent):
+        return {"fit_score": 0.5, "fit_label": "flex", "role_affinity": affinity}
+
+    return {"fit_score": 0.1, "fit_label": "off-meta", "role_affinity": affinity}
+
+
+def score_composition_archetype(player_slots: list[dict]) -> dict:
+    """
+    Determine the dominant playstyle archetype for a 5-player team.
+
+    Args:
+        player_slots: List of dicts, each with:
+            champion_meta (ChampionMeta dict)
+            role          (str, e.g. "TOP")
+
+    Returns:
+        {
+          "archetype":    str,   # e.g. "engage-dive"
+          "description":  str,
+          "tag_counts":   dict,  # aggregated DDragon tags across the team
+          "role_fit_avg": float, # mean fit score across all slots
+        }
+
+    Archetype decision rules (first match wins):
+      poke          — 2+ Mages and no Tank/Fighter majority
+      engage-dive   — 3+ Tanks or Fighters and a Support present
+      teamfight     — Marksman + Mage + Support present (APC/double AP counts)
+      protect-carry — 2+ Supports/Tanks with exactly 1 Marksman
+      skirmish-brawl— 3+ Assassins
+      split-push    — Fighter count dominant with a Mage or Assassin
+      balanced      — fallback
+    """
+    tag_counts: dict[str, int] = {}
+    fit_scores: list[float] = []
+
+    for slot in player_slots:
+        meta = slot.get("champion_meta") or {}
+        role = str(slot.get("role") or "")
+        tags: list[str] = meta.get("tags") or []
+        for tag in tags:
+            tag_counts[tag] = tag_counts.get(tag, 0) + 1
+
+        fit = analyze_role_champion_fit(meta, role) if role else {"fit_score": 0.1}
+        fit_scores.append(fit["fit_score"])
+
+    tank_fighter = tag_counts.get("Tank", 0) + tag_counts.get("Fighter", 0)
+    mage_n    = tag_counts.get("Mage", 0)
+    assassin_n = tag_counts.get("Assassin", 0)
+    marksman_n = tag_counts.get("Marksman", 0)
+    support_n  = tag_counts.get("Support", 0)
+
+    if mage_n >= 2 and tank_fighter < 3:
+        archetype, description = _COMP_TAG_ARCHETYPES[0]
+    elif tank_fighter >= 3 and support_n >= 1:
+        archetype, description = _COMP_TAG_ARCHETYPES[1]
+    elif marksman_n >= 1 and mage_n >= 1 and support_n >= 1:
+        archetype, description = _COMP_TAG_ARCHETYPES[2]
+    elif support_n + tag_counts.get("Tank", 0) >= 2 and marksman_n == 1:
+        archetype, description = _COMP_TAG_ARCHETYPES[3]
+    elif assassin_n >= 3:
+        archetype, description = _COMP_TAG_ARCHETYPES[4]
+    elif tag_counts.get("Fighter", 0) >= 2 and (mage_n >= 1 or assassin_n >= 1):
+        archetype, description = _COMP_TAG_ARCHETYPES[5]
+    else:
+        archetype, description = _COMP_TAG_ARCHETYPES[6]
+
+    role_fit_avg = round(sum(fit_scores) / len(fit_scores), 3) if fit_scores else 0.0
+
+    return {
+        "archetype":    archetype,
+        "description":  description,
+        "tag_counts":   tag_counts,
+        "role_fit_avg": role_fit_avg,
+    }
+
+
+def get_champion_matchup_stats(
+    db: Session,
+    champ_a_id: int,
+    champ_b_id: int,
+    role: Optional[str] = None,
+) -> dict:
+    """
+    Return head-to-head statistics for champion A vs champion B.
+
+    Method:
+      Self-join on participant_stats to find every match where champion A
+      and champion B appeared on opposite teams (team_id differs).  Joins
+      derived_metrics for both participants to compute per-match KDA and
+      kill differentials.
+
+    Args:
+        champ_a_id: Riot numeric champion id for side A.
+        champ_b_id: Riot numeric champion id for side B.
+        role:       Optional role filter applied to both sides (UPPER).
+
+    Returns:
+        {
+          "champ_a_id": int,
+          "champ_b_id": int,
+          "role":        str | None,
+          "sample_size": int,
+          "win_rate_a":  float | None,   # fraction of matches A's team won
+          "avg_kda_diff": float | None,  # avg(kda_a - kda_b)
+          "avg_kill_diff": float | None, # avg(kills_a - kills_b)
+        }
+    """
+    role_filter_a = "AND UPPER(a.role) = UPPER(:role)" if role else ""
+    role_filter_b = "AND UPPER(b.role) = UPPER(:role)" if role else ""
+
+    sql_str = f"""
+        SELECT
+            COUNT(*)                              AS sample_size,
+            AVG(CASE WHEN a.win THEN 1.0 ELSE 0.0 END)
+                                                  AS win_rate_a,
+            AVG(dma.kda - dmb.kda)                AS avg_kda_diff,
+            AVG(CAST(a.kills AS FLOAT) - CAST(b.kills AS FLOAT))
+                                                  AS avg_kill_diff
+        FROM participant_stats a
+        JOIN participant_stats b
+          ON  b.match_id   = a.match_id
+          AND b.team_id   != a.team_id
+          AND b.champion_id = :champ_b_id
+          {role_filter_b}
+        JOIN players pa ON pa.id = a.player_id
+        JOIN players pb ON pb.id = b.player_id
+        JOIN derived_metrics dma
+          ON dma.match_id = a.match_id AND dma.puuid = pa.puuid
+        JOIN derived_metrics dmb
+          ON dmb.match_id = b.match_id AND dmb.puuid = pb.puuid
+        WHERE a.champion_id = :champ_a_id
+          {role_filter_a}
+    """
+
+    params: dict = {"champ_a_id": champ_a_id, "champ_b_id": champ_b_id}
+    if role:
+        params["role"] = role
+
+    row = db.execute(text(sql_str), params).mappings().first()
+
+    sample_size = int(row["sample_size"]) if row else 0
+
+    if sample_size == 0:
+        return {
+            "champ_a_id":    champ_a_id,
+            "champ_b_id":    champ_b_id,
+            "role":          role.upper() if role else None,
+            "sample_size":   0,
+            "win_rate_a":    None,
+            "avg_kda_diff":  None,
+            "avg_kill_diff": None,
+        }
+
+    return {
+        "champ_a_id":    champ_a_id,
+        "champ_b_id":    champ_b_id,
+        "role":          role.upper() if role else None,
+        "sample_size":   sample_size,
+        "win_rate_a":    round(float(row["win_rate_a"]), 4)   if row["win_rate_a"]   is not None else None,
+        "avg_kda_diff":  round(float(row["avg_kda_diff"]), 3) if row["avg_kda_diff"] is not None else None,
+        "avg_kill_diff": round(float(row["avg_kill_diff"]), 3) if row["avg_kill_diff"] is not None else None,
     }

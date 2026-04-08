@@ -14,6 +14,19 @@ settings = get_settings()
 # Bursting to 5 concurrent is fine — we add a small inter-batch pause.
 _MATCH_CONCURRENCY = 5
 
+# ---------------------------------------------------------------------------
+# Global semaphore — caps total concurrent outbound Riot API sessions across
+# ALL simultaneous ingest/backfill requests.
+#
+# Without this, 5 concurrent /ingest/player calls each spawn up to 5 parallel
+# match fetches = 25 simultaneous Riot requests, guaranteeing 429s and the
+# 86-second sleep cascade.
+#
+# With limit=3: at most 3 ingest sessions run against Riot at once.
+# The 4th caller queues and starts only when a slot frees up.
+# ---------------------------------------------------------------------------
+_riot_api_semaphore: asyncio.Semaphore = asyncio.Semaphore(3)
+
 
 class RiotApiError(RuntimeError):
     pass
@@ -47,7 +60,23 @@ class RiotClient:
         path: str,
         params: Optional[dict] = None,
     ) -> Any:
-        """GET a Riot API endpoint with retry/back-off. Reuses the shared client."""
+        """GET a Riot API endpoint with retry/back-off. Reuses the shared client.
+
+        All outbound calls acquire _riot_api_semaphore first, capping total
+        concurrent Riot API sessions at 3 across all simultaneous requests.
+        This prevents the 429 cascade that occurs when multiple ingest calls
+        fire in parallel and exhaust the dev-key rate limit simultaneously.
+        """
+        async with _riot_api_semaphore:
+            return await self._request_json_inner(routing, path, params)
+
+    async def _request_json_inner(
+        self,
+        routing: str,
+        path: str,
+        params: Optional[dict] = None,
+    ) -> Any:
+        """Inner implementation — called only from _request_json inside the semaphore."""
         routing_host = routing.lower()
         url = f"https://{routing_host}.api.riotgames.com{path}"
 

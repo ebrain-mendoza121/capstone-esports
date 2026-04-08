@@ -22,3 +22,6 @@ backend/.env
 frontend/.envc
 
 backend copy
+# SQLite test artifacts
+*.db
+*.db-journal
