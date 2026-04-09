@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Esports Analytics Platform",
-  description: "Frontend for the esports capstone project",
+  title: "NexusIQ Esports Analytics",
+  description: "AI-powered League of Legends team and player analytics frontend",
 };
 
 export default function RootLayout({

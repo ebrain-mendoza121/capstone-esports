@@ -55,8 +55,8 @@ export default function PlayerDashboardPage() {
           <p className={styles.eyebrow}>Frontend MVP · Page 2</p>
           <div className={styles.heroTitleRow}>
             <h1 className={`${styles.title} ${styles.heroTitle}`}>Player Dashboard</h1>
-            <Link className={`${styles.buttonPrimary} ${styles.heroAction}`} href="/">
-              Back to Landing
+            <Link className={`${styles.buttonPrimary} ${styles.heroAction}`} href="/individual-stats">
+              Back to Individual Stats
             </Link>
           </div>
         </header>
