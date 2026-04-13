@@ -116,6 +116,37 @@ export interface PlayerTrends {
   series: TrendGamePoint[];
 }
 
+export interface ChampionStat {
+  champion_id: number;
+  champion_name: string;
+  games_played: number;
+  win_rate: number | null;
+  avg_kda: number | null;
+  avg_cs_per_min: number | null;
+  avg_gold_per_min: number | null;
+  avg_kills: number | null;
+  avg_deaths: number | null;
+  avg_assists: number | null;
+}
+
+export interface PlayerChampionStats {
+  puuid: string;
+  min_games: number;
+  champions_found: number;
+  champions: ChampionStat[];
+}
+
+export interface ObjectiveControl {
+  avg_towers_when_winning: number;
+  avg_towers_when_losing: number;
+  avg_dragons_when_winning: number;
+  avg_dragons_when_losing: number;
+  avg_barons_when_winning: number;
+  avg_barons_when_losing: number;
+  dragon_soul_rate: number;
+  total_matches_analyzed: number;
+}
+
 export interface RuneEntry {
   match_id: string;
   champion: string;
@@ -142,6 +173,7 @@ export interface MatchHistoryEntry {
   vision_score: number;
   items: number[];
   win: boolean;
+  team_id: 100 | 200;
   game_duration: number;
   patch_version: string;
   kda: number | null;
@@ -186,7 +218,8 @@ export interface CsPrediction {
 export interface EarlyGamePrediction {
   match_id: string;
   model_trained: boolean;
-  team100_win_probability: number | null;
+  team_100_win_probability: number | null;
+  team_200_win_probability: number | null;
   confidence: string;
   error?: string;
 }
@@ -215,6 +248,7 @@ export interface TeamStats {
 export interface MatchParticipant {
   puuid: string;
   riot_id: string;
+  tag_line: string;
   champion: string;
   role: RoleCode;
   kills: number;
@@ -237,7 +271,8 @@ export interface MatchDetail {
   queue_id: QueueCode;
   patch_version: string;
   game_duration: number;
-  date: string;
+  game_creation: number;
+  platform_id: string;
   teams: TeamStats[];
   participants: MatchParticipant[];
   has_timeline: boolean;
@@ -299,6 +334,12 @@ export interface TimelineFrame {
   position_y: number;
 }
 
+export interface TimelineFrameRaw {
+  frame_timestamp: number;
+  participant_id: number;
+  total_gold: number;
+}
+
 export type TimelineEventType =
   | "CHAMPION_KILL"
   | "BUILDING_KILL"
@@ -341,6 +382,8 @@ export interface FrontendMvpClient {
   getPlayerPlaystyle(puuid: string): Promise<PlaystyleResult | null>;
   getChampionRecommendations(puuid: string, topN?: number): Promise<ChampionRecommendation[]>;
   getPlayerTrends(puuid: string, window?: number): Promise<PlayerTrends>;
+  getPlayerChampionStats(puuid: string, minGames?: number): Promise<PlayerChampionStats>;
+  getObjectiveControl(puuid: string): Promise<ObjectiveControl>;
 
   // Page 3
   getMatchesByPlayer(puuid: string, limit: number): Promise<MatchHistoryEntry[]>;
@@ -366,6 +409,7 @@ export interface FrontendMvpClient {
   // Page 7
   getTimelineAvailability(matchId: string): Promise<TimelineAvailability>;//TODO
   getTimelineFramesByPuuid(matchId: string, puuid: string): Promise<TimelineFrame[]>;//TODO
+  getTimelineFramesAll(matchId: string, limit?: number): Promise<TimelineFrameRaw[]>;
   getTimelineEvents(matchId: string, limit: number, cursor?: string): Promise<TimelineEventsResponse>;//TODO
 }
 
@@ -811,6 +855,30 @@ async getPlayerTrends(puuid, window = 20) {
     return (await res.json()) as PlayerTrends;
   },
 
+  async getPlayerChampionStats(puuid, minGames = 1) {
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/champion-stats?min_games=${minGames}`
+    );
+    if (!res.ok) throw new Error(`Failed to fetch champion stats (${res.status})`);
+    return res.json() as Promise<PlayerChampionStats>;
+  },
+
+  async getObjectiveControl(puuid) {
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/objective-control`
+    );
+    if (!res.ok) throw new Error(`Failed to fetch objective control (${res.status})`);
+    return res.json() as Promise<ObjectiveControl>;
+  },
+
+  async getTimelineFramesAll(matchId, limit = 1000) {
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/frames?limit=${limit}`
+    );
+    if (!res.ok) throw new Error(`Failed to fetch timeline frames (${res.status})`);
+    return res.json() as Promise<TimelineFrameRaw[]>;
+  },
+
   async getTimelineEvents(matchId, limit, cursor) {
   const url =
     `${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/events/?limit=${limit}` +
@@ -832,7 +900,7 @@ async getPlayerTrends(puuid, window = 20) {
         type: string;
         detail: unknown;
       }) => ({
-        id: String(event.event_id),
+        event_id: String(event.event_id),
         timestamp: event.timestamp,
         type: event.type,
         detail: event.detail,

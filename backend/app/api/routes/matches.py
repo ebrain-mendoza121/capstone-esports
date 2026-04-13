@@ -67,6 +67,7 @@ async def get_player_matches(puuid: str, limit: int = 20, db: Session = Depends(
             "first_blood_kill": ps.first_blood_kill,
             "items": [ps.item0, ps.item1, ps.item2, ps.item3, ps.item4, ps.item5, ps.item6],
             "win": ps.win,
+            "team_id": ps.team_id,
             # Derived metrics
             "kda": dm.kda if dm else None,
             "cs_per_min": dm.cs_per_min if dm else None,

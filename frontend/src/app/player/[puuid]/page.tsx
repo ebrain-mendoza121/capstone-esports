@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import styles from "@/app/mvp.module.css";
 import {
   ChampionRecommendation,
+  ObjectiveControl,
   PlayerDetail,
   PlayerMetrics,
   PlayerRolePerformance,
@@ -31,6 +32,10 @@ function playstyleBadgeStyle(label: string): string {
 export default function PlayerDashboardPage() {
   const params = useParams<{ puuid: string }>();
   const puuid = Array.isArray(params.puuid) ? params.puuid[0] : params.puuid;
+  const searchParams = useSearchParams();
+  const ingestGameName = searchParams.get("gameName");
+  const ingestTagLine = searchParams.get("tagLine");
+  const ingestPlatform = searchParams.get("platform");
 
   const [player, setPlayer] = useState<PlayerDetail | null>(null);
   const [metrics, setMetrics] = useState<PlayerMetrics | null>(null);
@@ -39,13 +44,15 @@ export default function PlayerDashboardPage() {
   const [playstyle, setPlaystyle] = useState<PlaystyleResult | null | "loading">("loading");
   const [champRecs, setChampRecs] = useState<ChampionRecommendation[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [ingesting, setIngesting] = useState(false);
+  const [objControl, setObjControl] = useState<ObjectiveControl | null>(null);
 
   useEffect(() => {
     let mounted = true;
 
     const loadData = async () => {
       try {
-        const [playerData, metricData, runeData, roleData, playstyleData, champData] =
+        const [playerData, metricData, runeData, roleData, playstyleData, champData, objData] =
           await Promise.all([
             frontendMvpClient.getPlayer(puuid),
             frontendMvpClient.getPlayerMetrics(puuid),
@@ -53,6 +60,7 @@ export default function PlayerDashboardPage() {
             frontendMvpClient.getPlayerRolePerformance(puuid),
             frontendMvpClient.getPlayerPlaystyle(puuid),
             frontendMvpClient.getChampionRecommendations(puuid, 8),
+            frontendMvpClient.getObjectiveControl(puuid).catch(() => null),
           ]);
 
         if (!mounted) return;
@@ -63,14 +71,58 @@ export default function PlayerDashboardPage() {
         setRolePerf(roleData);
         setPlaystyle(playstyleData);
         setChampRecs(champData);
-      } catch (err) {
-        if (mounted) setError(err instanceof Error ? err.message : "Failed to load player data.");
+        setObjControl(objData);
+        setIngesting(false);
+      } catch {
+        if (!mounted) return;
+        // Player not yet ingested — if we have params, auto-ingest and retry
+        if (ingestGameName && ingestTagLine) {
+          setIngesting(true);
+          // Kick off ingest (may already be running from match page background fetch)
+          void fetch(`${process.env.NEXT_PUBLIC_API_URL}/ingest/player`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              gameName: ingestGameName,
+              tagLine: ingestTagLine,
+              platform: ingestPlatform ?? "NA",
+              count: 20,
+              queue: 420,
+            }),
+          }).then(() => {
+            if (mounted) void loadData();
+          }).catch(() => {
+            if (mounted) setError(`Could not ingest ${ingestGameName}#${ingestTagLine}. Try again later.`);
+          });
+        } else {
+          setError("Player not found. They may not have been ingested yet.");
+        }
       }
     };
 
     void loadData();
     return () => { mounted = false; };
-  }, [puuid]);
+  }, [puuid, ingestGameName, ingestTagLine, ingestPlatform]);
+
+  if (ingesting) {
+    return (
+      <main className={styles.page}>
+        <div className={styles.container}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 20, paddingTop: 80 }}>
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" style={{ animation: "spin 1s linear infinite" }}>
+              <style>{"@keyframes spin { to { transform: rotate(360deg); } }"}</style>
+              <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.15)" strokeWidth="3" />
+              <path d="M12 2a10 10 0 0 1 10 10" stroke="#26d4b7" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+            <p className={styles.loading}>
+              Fetching {ingestGameName ? `${ingestGameName}#${ingestTagLine}` : "player"}’s match data from Riot…
+            </p>
+            <p style={{ fontSize: 13, color: "rgba(255,255,255,0.45)" }}>This takes about 30–60 seconds for a new player.</p>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   const createdAtLabel = useMemo(() => {
     if (!player) return "—";
@@ -100,6 +152,9 @@ export default function PlayerDashboardPage() {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <Link className={styles.linkChip} href={`/player/${puuid}/trends`}>
                 📈 Performance Trends
+              </Link>
+              <Link className={styles.linkChip} href={`/player/${puuid}/champions`}>
+                🏆 Champion Stats
               </Link>
               <Link className={`${styles.buttonPrimary} ${styles.heroAction}`} href="/individual-stats">
                 Back to Individual Stats
@@ -238,6 +293,57 @@ export default function PlayerDashboardPage() {
             </div>
           )}
         </section>
+
+        {/* ── Objective Control ── */}
+        {objControl && (
+          <section className={styles.section}>
+            <div className={styles.sectionHeader}>
+              <div>
+                <h2 className={styles.sectionTitle}>Objective Control</h2>
+                <p className={styles.sectionCopy}>
+                  Average objectives secured when winning vs losing · {objControl.total_matches_analyzed} matches analyzed
+                </p>
+              </div>
+            </div>
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>Objective</th>
+                    <th style={{ color: "#4ade80" }}>Avg When Winning</th>
+                    <th style={{ color: "#f87171" }}>Avg When Losing</th>
+                    <th>Diff</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {([
+                    { label: "Towers",  win: objControl.avg_towers_when_winning,  loss: objControl.avg_towers_when_losing },
+                    { label: "Dragons", win: objControl.avg_dragons_when_winning, loss: objControl.avg_dragons_when_losing },
+                    { label: "Barons",  win: objControl.avg_barons_when_winning,  loss: objControl.avg_barons_when_losing },
+                  ] as const).map(({ label, win, loss }) => {
+                    const diff = win - loss;
+                    return (
+                      <tr key={label}>
+                        <td><strong>{label}</strong></td>
+                        <td style={{ color: "#4ade80" }}>{win.toFixed(1)}</td>
+                        <td style={{ color: "#f87171" }}>{loss.toFixed(1)}</td>
+                        <td style={{ color: diff >= 0 ? "#4ade80" : "#f87171", fontWeight: 600 }}>
+                          {diff >= 0 ? "+" : ""}{diff.toFixed(1)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  <tr>
+                    <td><strong>Dragon Soul Rate</strong></td>
+                    <td colSpan={3}>
+                      <span className={styles.badge}>{pct(objControl.dragon_soul_rate)}</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
 
         {/* ── Playstyle ── */}
         <section className={styles.section}>

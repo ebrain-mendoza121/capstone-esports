@@ -162,6 +162,7 @@ export default function MatchHistoryPage() {
               <table className={styles.table}>
                 <thead>
                   <tr>
+                    <th>Side</th>
                     <th>Champion</th>
                     <th>Role</th>
                     <th>K/D/A</th>
@@ -190,16 +191,26 @@ export default function MatchHistoryPage() {
                         : "—";
 
                     return (
-                      <tr key={match.match_id}>
+                      <tr
+                        key={match.match_id}
+                        onClick={() => router.push(`/match/${match.match_id}`)}
+                        style={{ cursor: "pointer" }}
+                      >
                         <td>
-                          <button
-                            className={styles.rowButton}
-                            type="button"
-                            onClick={() => router.push(`/match/${match.match_id}`)}
-                          >
-                            {match.champion}
-                          </button>
+                          <span style={{
+                            display: "inline-block",
+                            padding: "2px 8px",
+                            borderRadius: 4,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            background: match.team_id === 100 ? "rgba(59,130,246,0.2)" : "rgba(239,68,68,0.2)",
+                            color: match.team_id === 100 ? "#93c5fd" : "#fca5a5",
+                            letterSpacing: "0.04em",
+                          }}>
+                            {match.team_id === 100 ? "Blue" : "Red"}
+                          </span>
                         </td>
+                        <td>{match.champion}</td>
                         <td>{match.role}</td>
                         <td>{match.kills}/{match.deaths}/{match.assists}</td>
                         <td>{match.cs}</td>

@@ -3,14 +3,17 @@ import time
 from typing import Dict, List, Any
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import OperationalError as SAOperationalError, TimeoutError as SATimeoutError
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, text
+from sqlalchemy import func, desc, text, Integer
 
 from app.db.session import get_db
 from app.models.player import Player
 from app.models.match import Match
 from app.models.participant_stats import ParticipantStats
+from app.models.derived_metrics import DerivedMetrics
 from app.models.team_bans import TeamBans
+from app.models.team_objectives import TeamObjectives
 from app.models.participant_perks import ParticipantPerks
 from app.services.ddragon import get_champion_map, get_rune_map
 from app.services.feature_extractor import get_rolling_features
@@ -413,6 +416,23 @@ def get_player_trends(
     Query params:
         window (int, default 20): rolling window size (also controls series length)
     """
+    try:
+        return _get_player_trends_impl(puuid=puuid, window=window, db=db)
+    except (SAOperationalError, SATimeoutError):
+        # Let app-level 503 handlers in main.py handle DB pool / connection errors.
+        raise
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Unhandled error in get_player_trends for puuid=%s: %s", puuid, exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to compute trends for player: {type(exc).__name__}",
+        )
+
+
+def _get_player_trends_impl(puuid: str, window: int, db: Session) -> Dict[str, Any]:
+    """Inner implementation — allows the route to wrap it in a try/except."""
     player = db.query(Player).filter(Player.puuid == puuid).first()
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
@@ -502,4 +522,178 @@ def get_player_trends(
             "win_streak":          rolling.get("win_streak"),
         },
         "series": series,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Champion Stats — per-champion aggregated performance for one player
+# ---------------------------------------------------------------------------
+
+@router.get("/player/{puuid}/champion-stats")
+async def get_player_champion_stats(
+    puuid: str,
+    min_games: int = 1,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Per-champion aggregated stats for a player across all ranked (queue 420) games.
+
+    Returns one entry per champion played, sorted by games_played descending.
+    Filter by ``min_games`` to surface only champions with meaningful sample sizes.
+
+    Fields per champion:
+        champion_id, champion_name, games_played, win_rate, avg_kda,
+        avg_cs_per_min, avg_gold_per_min, avg_kills, avg_deaths, avg_assists
+    """
+    player = db.query(Player).filter(Player.puuid == puuid).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    rows = (
+        db.query(
+            ParticipantStats.champion_id,
+            ParticipantStats.champion,
+            func.count(ParticipantStats.match_id).label("games_played"),
+            func.avg(func.cast(ParticipantStats.win, Integer)).label("win_rate_raw"),
+            func.avg(DerivedMetrics.kda).label("avg_kda"),
+            func.avg(DerivedMetrics.cs_per_min).label("avg_cs_per_min"),
+            func.avg(DerivedMetrics.gold_per_min).label("avg_gold_per_min"),
+            func.avg(ParticipantStats.kills).label("avg_kills"),
+            func.avg(ParticipantStats.deaths).label("avg_deaths"),
+            func.avg(ParticipantStats.assists).label("avg_assists"),
+        )
+        .join(Match, Match.match_id == ParticipantStats.match_id)
+        .join(
+            DerivedMetrics,
+            (DerivedMetrics.match_id == ParticipantStats.match_id)
+            & (DerivedMetrics.puuid == puuid),
+        )
+        .filter(
+            ParticipantStats.player_id == player.id,
+            Match.queue_id == 420,
+        )
+        .group_by(ParticipantStats.champion_id, ParticipantStats.champion)
+        .having(func.count(ParticipantStats.match_id) >= min_games)
+        .order_by(desc(func.count(ParticipantStats.match_id)))
+        .all()
+    )
+
+    if not rows:
+        return {
+            "puuid": puuid,
+            "min_games": min_games,
+            "champions_found": 0,
+            "champions": [],
+        }
+
+    champion_map = await get_champion_map()
+
+    def _round(val, ndigits: int):
+        return round(float(val), ndigits) if val is not None else None
+
+    champions = []
+    for row in rows:
+        # win_rate: boolean column — True counts as 1, False as 0
+        win_rate_raw = row.win_rate_raw
+        win_rate = _round(win_rate_raw, 4) if win_rate_raw is not None else None
+
+        champions.append({
+            "champion_id":    row.champion_id,
+            "champion_name":  champion_map.get(row.champion_id) or row.champion,
+            "games_played":   row.games_played,
+            "win_rate":       win_rate,
+            "avg_kda":        _round(row.avg_kda, 2),
+            "avg_cs_per_min": _round(row.avg_cs_per_min, 2),
+            "avg_gold_per_min": _round(row.avg_gold_per_min, 1),
+            "avg_kills":      _round(row.avg_kills, 2),
+            "avg_deaths":     _round(row.avg_deaths, 2),
+            "avg_assists":    _round(row.avg_assists, 2),
+        })
+
+    return {
+        "puuid":           puuid,
+        "min_games":       min_games,
+        "champions_found": len(champions),
+        "champions":       champions,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Objective control — team objective stats split by win/loss
+# ---------------------------------------------------------------------------
+
+@router.get("/player/{puuid}/objective-control")
+def get_player_objective_control(
+    puuid: str,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Aggregate team objective stats (towers, dragons, barons) split by
+    win/loss outcome for a single player's ranked (queue 420) games.
+
+    Joins participant_stats → matches → team_objectives on (match_id, team_id)
+    so every value reflects the *player's team*, not the opponent's.
+
+    Returns:
+        avg_towers_when_winning, avg_towers_when_losing,
+        avg_dragons_when_winning, avg_dragons_when_losing,
+        avg_barons_when_winning, avg_barons_when_losing,
+        total_matches_analyzed,
+        dragon_soul_rate  (share of games where team secured 4+ dragons)
+    """
+    player = db.query(Player).filter(Player.puuid == puuid).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    rows = (
+        db.query(
+            TeamObjectives.win_flag,
+            TeamObjectives.towers,
+            TeamObjectives.dragons,
+            TeamObjectives.barons,
+        )
+        .join(
+            ParticipantStats,
+            (ParticipantStats.match_id == TeamObjectives.match_id)
+            & (ParticipantStats.team_id == TeamObjectives.team_id),
+        )
+        .join(Match, Match.match_id == TeamObjectives.match_id)
+        .filter(
+            ParticipantStats.player_id == player.id,
+            Match.queue_id == 420,
+        )
+        .all()
+    )
+
+    if not rows:
+        return {
+            "puuid":                    puuid,
+            "total_matches_analyzed":   0,
+            "avg_towers_when_winning":  None,
+            "avg_towers_when_losing":   None,
+            "avg_dragons_when_winning": None,
+            "avg_dragons_when_losing":  None,
+            "avg_barons_when_winning":  None,
+            "avg_barons_when_losing":   None,
+            "dragon_soul_rate":         None,
+        }
+
+    def _avg(values: list) -> float | None:
+        return round(sum(values) / len(values), 2) if values else None
+
+    wins  = [r for r in rows if r.win_flag]
+    losses = [r for r in rows if not r.win_flag]
+
+    dragon_soul_games = sum(1 for r in rows if r.dragons >= 4)
+
+    return {
+        "puuid":                    puuid,
+        "total_matches_analyzed":   len(rows),
+        "avg_towers_when_winning":  _avg([r.towers  for r in wins]),
+        "avg_towers_when_losing":   _avg([r.towers  for r in losses]),
+        "avg_dragons_when_winning": _avg([r.dragons for r in wins]),
+        "avg_dragons_when_losing":  _avg([r.dragons for r in losses]),
+        "avg_barons_when_winning":  _avg([r.barons  for r in wins]),
+        "avg_barons_when_losing":   _avg([r.barons  for r in losses]),
+        "dragon_soul_rate":         round(dragon_soul_games / len(rows), 2),
     }

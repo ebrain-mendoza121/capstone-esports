@@ -10,6 +10,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from app.core.limiter import limiter  # noqa: F401 — re-exported for backwards compat
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError as SAOperationalError, TimeoutError as SATimeoutError
 
 from app.api.router import api_router
 from app.api.routes.health import router as health_router
@@ -105,6 +106,50 @@ async def _timeout_middleware(request: Request, call_next):
 
 app.include_router(health_router)
 app.include_router(api_router)
+
+
+# ---------------------------------------------------------------------------
+# Specific SQLAlchemy exception handlers — return 503 for transient DB issues
+# so monitoring tools and load tests can distinguish "DB busy" from real bugs.
+# ---------------------------------------------------------------------------
+
+@app.exception_handler(SATimeoutError)
+async def _db_timeout_handler(request: Request, exc: SATimeoutError) -> JSONResponse:
+    """Connection pool exhausted — return 503 with Retry-After hint."""
+    logger.warning(
+        "DB connection pool timeout on %s %s — pool exhausted under load",
+        request.method,
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=503,
+        headers={"Retry-After": "2"},
+        content={
+            "error":   "DatabasePoolTimeout",
+            "message": "Database connection pool exhausted. Please retry in a moment.",
+            "path":    request.url.path,
+        },
+    )
+
+
+@app.exception_handler(SAOperationalError)
+async def _db_operational_handler(request: Request, exc: SAOperationalError) -> JSONResponse:
+    """Transient DB connection error (e.g. PgBouncer reset, network blip)."""
+    logger.warning(
+        "DB operational error on %s %s: %s",
+        request.method,
+        request.url.path,
+        str(exc)[:200],
+    )
+    return JSONResponse(
+        status_code=503,
+        headers={"Retry-After": "1"},
+        content={
+            "error":   "DatabaseOperationalError",
+            "message": "Transient database error. Please retry.",
+            "path":    request.url.path,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

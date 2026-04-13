@@ -2,17 +2,17 @@
 Integration tests for analytics routes.
 
 Covers:
-  GET /analytics/player/{puuid}/bans         → 404 unknown player
-  GET /analytics/champion/{id}/ban-rate      → 200 with empty DB
-  GET /analytics/bans/most-banned            → 200 with empty list
-  GET /analytics/runes/map                   → 200 with mocked DDragon data
-  GET /analytics/player/{puuid}/runes        → 404 unknown player
-  GET /analytics/player/{puuid}/role-performance → PG-only (xfail on SQLite)
-  GET /analytics/player/{puuid}/trends       → PG-only (xfail on SQLite)
+  GET /analytics/player/{puuid}/bans              → 404 unknown player
+  GET /analytics/champion/{id}/ban-rate           → 200 with empty DB
+  GET /analytics/bans/most-banned                 → 200 with empty list
+  GET /analytics/runes/map                        → 200 with mocked DDragon data
+  GET /analytics/player/{puuid}/runes             → 404 unknown player
+  GET /analytics/player/{puuid}/role-performance  → graceful on unknown player
+  GET /analytics/player/{puuid}/trends            → graceful on unknown player
 
-SQLite cannot run PERCENTILE_CONT / window functions used in role-performance
-and trends; those tests are marked xfail.  All other tests only use ORM
-queries compatible with SQLite.
+All tests run against the in-memory SQLite test database. The role-performance
+and trends endpoints use raw SQL that happens to be SQLite-compatible for the
+unknown-player code path (early 404 / empty response, no window functions run).
 """
 
 import pytest
@@ -27,13 +27,6 @@ _MOCK_RUNE_MAP = {
     8429: "Glacial Augment",
 }
 
-_PG_ONLY = pytest.mark.xfail(
-    strict=False,
-    reason=(
-        "Requires PostgreSQL: PERCENTILE_CONT / window functions are "
-        "unsupported by the SQLite test database. Passes against real DB."
-    ),
-)
 
 
 # ---------------------------------------------------------------------------
@@ -160,10 +153,9 @@ def test_player_runes_unknown_puuid_returns_404(client):
 
 
 # ---------------------------------------------------------------------------
-# Role performance — PG-only (graceful xfail on SQLite)
+# Role performance — unknown player
 # ---------------------------------------------------------------------------
 
-@_PG_ONLY
 @pytest.mark.integration
 def test_role_performance_unknown_player_returns_graceful(client):
     """GET /analytics/player/{puuid}/role-performance gracefully handles unknown PUUID."""
@@ -175,12 +167,86 @@ def test_role_performance_unknown_player_returns_graceful(client):
 
 
 # ---------------------------------------------------------------------------
-# Trends — PG-only (graceful xfail on SQLite)
+# Trends endpoint — unknown player
 # ---------------------------------------------------------------------------
 
-@_PG_ONLY
 @pytest.mark.integration
 def test_trends_unknown_player_returns_graceful(client):
     """GET /analytics/player/{puuid}/trends gracefully handles unknown PUUID."""
     resp = client.get("/analytics/player/ghost-puuid/trends")
     assert resp.status_code in (200, 404, 500)
+
+
+# ---------------------------------------------------------------------------
+# Champion stats endpoint
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+def test_champion_stats_unknown_player_returns_404(client):
+    """GET /analytics/player/{puuid}/champion-stats returns 404 for unknown PUUID."""
+    with patch(
+        "app.api.routes.analytics.get_champion_map",
+        AsyncMock(return_value=_MOCK_CHAMPION_MAP),
+    ):
+        resp = client.get("/analytics/player/ghost-puuid/champion-stats")
+    assert resp.status_code == 404
+
+
+@pytest.mark.integration
+def test_champion_stats_empty_db_returns_empty_list(client, db_session):
+    """GET /analytics/player/{puuid}/champion-stats returns empty champions list when player has no matches."""
+    from app.models.player import Player as PlayerModel
+    player = PlayerModel(riot_id="TestPlayer", tag_line="NA1", puuid="test-puuid-cs", region="NA")
+    db_session.add(player)
+    db_session.commit()
+
+    with patch(
+        "app.api.routes.analytics.get_champion_map",
+        AsyncMock(return_value=_MOCK_CHAMPION_MAP),
+    ):
+        resp = client.get("/analytics/player/test-puuid-cs/champion-stats")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["puuid"] == "test-puuid-cs"
+    assert data["champions_found"] == 0
+    assert data["champions"] == []
+
+
+@pytest.mark.integration
+def test_champion_stats_response_shape(client, db_session):
+    """GET /analytics/player/{puuid}/champion-stats returns expected shape with data."""
+    from app.models.player import Player as PlayerModel
+    player = PlayerModel(riot_id="TestPlayer2", tag_line="NA1", puuid="test-puuid-cs2", region="NA")
+    db_session.add(player)
+    db_session.commit()
+
+    with patch(
+        "app.api.routes.analytics.get_champion_map",
+        AsyncMock(return_value=_MOCK_CHAMPION_MAP),
+    ):
+        resp = client.get("/analytics/player/test-puuid-cs2/champion-stats")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "puuid" in data
+    assert "min_games" in data
+    assert "champions_found" in data
+    assert "champions" in data
+    assert isinstance(data["champions"], list)
+
+
+@pytest.mark.integration
+def test_champion_stats_min_games_param_accepted(client, db_session):
+    """GET /analytics/player/{puuid}/champion-stats?min_games=3 does not error."""
+    from app.models.player import Player as PlayerModel
+    player = PlayerModel(riot_id="TestPlayer3", tag_line="NA1", puuid="test-puuid-cs3", region="NA")
+    db_session.add(player)
+    db_session.commit()
+
+    with patch(
+        "app.api.routes.analytics.get_champion_map",
+        AsyncMock(return_value=_MOCK_CHAMPION_MAP),
+    ):
+        resp = client.get("/analytics/player/test-puuid-cs3/champion-stats?min_games=3")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["min_games"] == 3
