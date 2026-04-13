@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.champion_matchups import ChampionMatchup
 from app.services.ddragon import get_champion_full_map
 from app.services.riot_live_service import get_team_stats, get_live_player_stats
 from app.services.ai_service import analyze_team_composition, role_matchup_breakdown, _load_model
@@ -633,12 +634,83 @@ async def predict_matchup(
     red_edges  = sum(1 for m in role_matchups if m["overall_edge"] == "red")
     even_lanes = sum(1 for m in role_matchups if m["overall_edge"] == "even")
 
+    # --- Champion matchup warnings from researched CSV data ---
+    # Cross-reference each lane's champion pair against the champion_matchups table.
+    # Surfaces unfavorable (win_rate < 0.45) and favorable (win_rate > 0.55) flags.
+    champion_matchup_flags: List[Dict[str, Any]] = []
+    try:
+        _UNFAV_THRESHOLD = 0.45
+        _FAV_THRESHOLD   = 0.55
+
+        for blue_slot, red_slot in zip(blue_slots, red_slots):
+            b_champ_id = (blue_slot.get("champion_meta") or {}).get("id")
+            r_champ_id = (red_slot.get("champion_meta") or {}).get("id")
+            b_role = blue_slot.get("declared_role") or blue_slot.get("primary_role")
+            if not b_champ_id or not r_champ_id:
+                continue
+
+            # Check both directions; prefer the stored direction
+            row: Optional[ChampionMatchup] = db.query(ChampionMatchup).filter(
+                ChampionMatchup.champion_a_id == b_champ_id,
+                ChampionMatchup.champion_b_id == r_champ_id,
+            ).first()
+            inverted = False
+            if row is None:
+                row = db.query(ChampionMatchup).filter(
+                    ChampionMatchup.champion_a_id == r_champ_id,
+                    ChampionMatchup.champion_b_id == b_champ_id,
+                ).first()
+                inverted = row is not None
+
+            if row is None:
+                continue
+
+            blue_wr = row.win_rate_a_vs_b if not inverted else 1.0 - row.win_rate_a_vs_b
+
+            if blue_wr < _UNFAV_THRESHOLD:
+                flag_type = "unfavorable_for_blue"
+                msg = (
+                    f"{blue_slot['champion_meta']['name']} vs "
+                    f"{red_slot['champion_meta']['name']}"
+                    f"{' in ' + b_role if b_role else ''}: "
+                    f"Blue wins {round(blue_wr * 100, 1)}% — unfavorable matchup "
+                    f"({row.confidence} confidence, {row.games_played} games)"
+                )
+            elif blue_wr > _FAV_THRESHOLD:
+                flag_type = "favorable_for_blue"
+                msg = (
+                    f"{blue_slot['champion_meta']['name']} vs "
+                    f"{red_slot['champion_meta']['name']}"
+                    f"{' in ' + b_role if b_role else ''}: "
+                    f"Blue wins {round(blue_wr * 100, 1)}% — favorable matchup "
+                    f"({row.confidence} confidence, {row.games_played} games)"
+                )
+            else:
+                continue  # even matchup, no flag needed
+
+            champion_matchup_flags.append({
+                "type":                flag_type,
+                "blue_champion_id":    b_champ_id,
+                "blue_champion_name":  (blue_slot.get("champion_meta") or {}).get("name"),
+                "red_champion_id":     r_champ_id,
+                "red_champion_name":   (red_slot.get("champion_meta") or {}).get("name"),
+                "role":                b_role,
+                "blue_win_rate":       round(blue_wr, 4),
+                "confidence":          row.confidence,
+                "games_played":        row.games_played,
+                "source":              row.source,
+                "message":             msg,
+            })
+    except Exception as _e:
+        logger.warning("Champion matchup flag lookup failed: %s", _e)
+
     return {
-        "platform":             body.platform,
-        "blue_win_probability": blue_win_prob,
-        "red_win_probability":  red_win_prob,
-        "prediction_method":    win_prob_source,
-        "role_matchups":        role_matchups,
+        "platform":               body.platform,
+        "blue_win_probability":   blue_win_prob,
+        "red_win_probability":    red_win_prob,
+        "prediction_method":      win_prob_source,
+        "role_matchups":          role_matchups,
+        "champion_matchup_flags": champion_matchup_flags,   # NEW — from researched CSV data
         "lane_edges": {
             "blue_lanes_winning": blue_edges,
             "red_lanes_winning":  red_edges,

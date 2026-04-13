@@ -25,6 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.models.champion_matchups import ChampionMatchup
 from app.services.ddragon import get_champion_full_map
 
 logger = logging.getLogger(__name__)
@@ -224,16 +225,17 @@ async def champion_matchup(
     """
     Head-to-head matchup statistics for two champions.
 
-    Uses a self-join on participant_stats to find all ranked matches where
-    champ_a and champ_b appeared on opposite teams.
+    Data source priority (highest first):
+      1. champion_matchups table — manually-researched rows from Lolalytics/op.gg/u.gg
+         uploaded via POST /matchups/import/csv.  These typically have 500–5000 games
+         and are far more statistically reliable.
+      2. participant_stats self-join — derived from locally-ingested matches.
+         Only used when no researched row exists for this pair + role.
+
+    If the researched table has the pair in one direction (A vs B) but the request
+    asks for B vs A, the win rate is inverted automatically (1 - win_rate_a_vs_b).
 
     Optional ?role=MIDDLE scopes the query to a specific lane.
-
-    Returns:
-    - champ_a win rate against champ_b
-    - average KDA differential (champ_a minus champ_b)
-    - average kill differential
-    - sample size (number of games found)
     """
     champ_map = await _full_map()
 
@@ -252,7 +254,65 @@ async def champion_matchup(
             detail=f"Invalid role '{role}'. Valid roles: {', '.join(sorted(_VALID_ROLES))}",
         )
 
-    # Build the self-join query with optional role scoping
+    # ------------------------------------------------------------------
+    # 1. Check champion_matchups table first (manually-researched data)
+    #    Wrapped in try/except so the endpoint degrades gracefully if the
+    #    migration hasn't been run yet (table doesn't exist in Supabase).
+    # ------------------------------------------------------------------
+    def _cm_query(a_id: int, b_id: int):
+        q = db.query(ChampionMatchup).filter(
+            ChampionMatchup.champion_a_id == a_id,
+            ChampionMatchup.champion_b_id == b_id,
+        )
+        if role_filter:
+            q = q.filter(ChampionMatchup.role == role_filter)
+        return q.first()
+
+    researched: Optional[ChampionMatchup] = None
+    inverted = False
+    try:
+        researched = _cm_query(champ_a_id, champ_b_id)
+        if researched is None:
+            # Check if stored in the other direction
+            researched = _cm_query(champ_b_id, champ_a_id)
+            inverted = researched is not None
+    except Exception as _e:
+        # Table doesn't exist yet — fall through to participant_stats path
+        logger.debug("champion_matchups lookup skipped (%s), falling back to ingested data", _e)
+        db.rollback()  # clear the failed transaction so the session stays usable
+
+    if researched is not None:
+        # Bayesian smoothing (applied at query time, not stored)
+        raw_wr = researched.win_rate_a_vs_b if not inverted else 1.0 - researched.win_rate_a_vs_b
+        weight = 20  # prior weight — small samples pulled toward 0.5
+        smoothed = (raw_wr * researched.games_played + 0.5 * weight) / (researched.games_played + weight)
+
+        return {
+            "champ_a": {"id": meta_a["id"], "name": meta_a["name"], "image_url": meta_a["image_url"]},
+            "champ_b": {"id": meta_b["id"], "name": meta_b["name"], "image_url": meta_b["image_url"]},
+            "role_scope":               role_filter,
+            "data_source":              "researched",   # explicitly flags which source was used
+            "games_played":             researched.games_played,
+            "confidence":               researched.confidence,
+            "champ_a_win_rate":         round(raw_wr, 4),
+            "champ_a_win_rate_smoothed": round(smoothed, 4),
+            "champ_b_win_rate":         round(1.0 - raw_wr, 4),
+            "avg_kda_diff":             None,   # not available from external research data
+            "avg_kill_diff":            None,
+            "avg_gold_diff_per_min":    None,
+            "patch":                    researched.patch,
+            "source":                   researched.source,
+            "note": (
+                f"Data sourced from {researched.source or 'external research'} "
+                f"(patch {researched.patch or 'unknown'}). "
+                + (f"Bayesian smoothing applied — only {researched.games_played} games."
+                   if researched.confidence == "low" else "")
+            ),
+        }
+
+    # ------------------------------------------------------------------
+    # 2. Fall back to participant_stats self-join (locally ingested data)
+    # ------------------------------------------------------------------
     role_clause = "AND a.role = :role AND b.role = :role" if role_filter else ""
 
     sql = text(f"""
@@ -290,33 +350,30 @@ async def champion_matchup(
 
     row = db.execute(sql, params).mappings().first()
     games = int(row["games_played"]) if row else 0
-
-    # Confidence label based on sample size
     confidence = "high" if games >= 30 else "medium" if games >= 10 else "low"
 
     return {
-        "champ_a": {
-            "id":        meta_a["id"],
-            "name":      meta_a["name"],
-            "image_url": meta_a["image_url"],
-        },
-        "champ_b": {
-            "id":        meta_b["id"],
-            "name":      meta_b["name"],
-            "image_url": meta_b["image_url"],
-        },
-        "role_scope":         role_filter,
-        "games_played":       games,
-        "confidence":         confidence,
-        "champ_a_win_rate":   float(row["champ_a_win_rate"]) if games else None,
-        "champ_b_win_rate":   round(1.0 - float(row["champ_a_win_rate"]), 4) if games else None,
-        "avg_kda_diff":       float(row["avg_kda_diff"])          if games else None,
-        "avg_kill_diff":      float(row["avg_kill_diff"])         if games else None,
+        "champ_a": {"id": meta_a["id"], "name": meta_a["name"], "image_url": meta_a["image_url"]},
+        "champ_b": {"id": meta_b["id"], "name": meta_b["name"], "image_url": meta_b["image_url"]},
+        "role_scope":            role_filter,
+        "data_source":           "ingested",   # derived from locally-ingested matches
+        "games_played":          games,
+        "confidence":            confidence,
+        "champ_a_win_rate":      float(row["champ_a_win_rate"]) if games else None,
+        "champ_a_win_rate_smoothed": None,
+        "champ_b_win_rate":      round(1.0 - float(row["champ_a_win_rate"]), 4) if games else None,
+        "avg_kda_diff":          float(row["avg_kda_diff"])          if games else None,
+        "avg_kill_diff":         float(row["avg_kill_diff"])         if games else None,
         "avg_gold_diff_per_min": float(row["avg_gold_diff_per_min"]) if games else None,
+        "patch":                 None,
+        "source":                None,
         "note": (
-            f"Low sample size ({games} games) — results may not be statistically reliable."
-            if 0 < games < 10 else
-            "No data found for this matchup in the current dataset." if games == 0 else None
+            "No researched matchup data found — showing stats derived from locally-ingested matches. "
+            "Upload a CSV via POST /matchups/import/csv for higher-quality data."
+            if games == 0 else
+            f"Derived from {games} ingested ranked games. "
+            + ("Low sample size — results may not be reliable. " if games < 10 else "")
+            + "Upload researched data via POST /matchups/import/csv for higher accuracy."
         ),
     }
 

@@ -265,3 +265,22 @@ model participant_perks {
   @@index([primary_style], map: "ix_participant_perks_primary_style")
 }
 
+
+model champion_matchups {
+  id               Int     @id @default(autoincrement())
+  champion_a_id    Int
+  champion_b_id    Int
+  champion_a_name  String? @db.VarChar(64)
+  champion_b_name  String? @db.VarChar(64)
+  role             String  @db.VarChar(32)
+  win_rate_a_vs_b  Float
+  games_played     Int     @default(0)
+  patch            String? @db.VarChar(16)
+  source           String? @db.VarChar(32)
+  notes            String? @db.VarChar(256)
+  confidence       String  @default("low") @db.VarChar(16)
+
+  @@unique([champion_a_id, champion_b_id, role], map: "uq_champion_matchup_pair_role")
+  @@index([champion_a_id, role], map: "ix_champion_matchups_a_role")
+  @@index([champion_b_id, role], map: "ix_champion_matchups_b_role")
+}

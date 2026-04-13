@@ -10,6 +10,7 @@ from app.api.routes.timeline import router as timeline_router
 from app.api.routes.ai import router as ai_router
 from app.api.routes.teams import router as teams_router
 from app.api.routes.champions import router as champions_router
+from app.api.routes.matchups import router as matchups_router
 
 api_router = APIRouter()
 
@@ -23,3 +24,4 @@ api_router.include_router(timeline_router)
 api_router.include_router(ai_router)
 api_router.include_router(teams_router)
 api_router.include_router(champions_router)
+api_router.include_router(matchups_router)
