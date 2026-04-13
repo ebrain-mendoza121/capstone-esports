@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import styles from "@/app/mvp.module.css";
-import { DraftData, MatchDetail, MockApiError, frontendMvpClient } from "@/lib/frontendMvpClient";
+import { DraftData, EarlyGamePrediction, MatchDetail, MockApiError, frontendMvpClient } from "@/lib/frontendMvpClient";
 
 function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
@@ -19,14 +19,16 @@ export default function MatchDetailPage() {
   const [detail, setDetail] = useState<MatchDetail | null>(null);
   const [draft, setDraft] = useState<DraftData | null>(null);
   const [timelineAvailable, setTimelineAvailable] = useState(false);
+  const [earlyGame, setEarlyGame] = useState<EarlyGamePrediction | null>(null);
 
   useEffect(() => {
     let mounted = true;
 
     const loadData = async () => {
-      const [detailResponse, draftResponse] = await Promise.all([
+      const [detailResponse, draftResponse, earlyGameResponse] = await Promise.all([
         frontendMvpClient.getMatch(matchId),
-        frontendMvpClient.getMatchDraft(matchId),
+        frontendMvpClient.getMatchDraft(matchId).catch(() => null),
+        frontendMvpClient.getEarlyGamePrediction(matchId).catch(() => null),
       ]);
 
       let hasTimeline = false;
@@ -46,6 +48,7 @@ export default function MatchDetailPage() {
       setDetail(detailResponse);
       setDraft(draftResponse);
       setTimelineAvailable(hasTimeline);
+      setEarlyGame(earlyGameResponse);
     };
 
     void loadData();
@@ -64,11 +67,11 @@ export default function MatchDetailPage() {
     [detail],
   );
 
-  if (!detail || !draft) {
+  if (!detail) {
     return (
       <main className={styles.page}>
         <div className={styles.container}>
-          <p className={styles.loading}>Loading match detail and draft...</p>
+          <p className={styles.loading}>Loading match detail…</p>
         </div>
       </main>
     );
@@ -104,6 +107,44 @@ export default function MatchDetailPage() {
           </div>
         </section>
 
+        {/* ── Early Game AI Prediction ── */}
+        {earlyGame && (
+          <section className={styles.section}>
+            <div className={styles.sectionHeader}>
+              <div>
+                <h2 className={styles.sectionTitle}>Early Game Prediction</h2>
+                <p className={styles.sectionCopy}>
+                  T=10 / T=15 gold, XP, CS differential model · Blue Team win probability
+                </p>
+              </div>
+            </div>
+            {!earlyGame.model_trained ? (
+              <p className={styles.emptyState}>
+                Early game model not trained yet — run <code>POST /ai/train/early-game</code>.
+              </p>
+            ) : earlyGame.error === "no_timeline_data" ? (
+              <p className={styles.emptyState}>
+                No timeline data for this match — re-ingest with <code>fetch_timeline=true</code>.
+              </p>
+            ) : (
+              <div className={styles.inlineList}>
+                <span className={
+                  earlyGame.team100_win_probability !== null && earlyGame.team100_win_probability >= 0.5
+                    ? styles.badgeWin
+                    : styles.badgeLoss
+                }>
+                  Blue Team Win Prob:{" "}
+                  {earlyGame.team100_win_probability !== null
+                    ? `${(earlyGame.team100_win_probability * 100).toFixed(1)}%`
+                    : "—"}
+                </span>
+                <span className={styles.badge}>Confidence: {earlyGame.confidence}</span>
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* ── Draft / Bans ── */}
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <div>
@@ -112,20 +153,26 @@ export default function MatchDetailPage() {
             </div>
           </div>
 
-          <div className={styles.twoCol}>
-            <article className={styles.dataCard}>
-              <h3>Blue Team Bans</h3>
-              <p className={styles.small}>{draft.team100_bans.join(" · ")}</p>
-              <h3 style={{ marginTop: "10px" }}>Blue Team Picks</h3>
-              <p className={styles.small}>{draft.team100_picks.join(" · ")}</p>
-            </article>
-            <article className={styles.dataCard}>
-              <h3>Red Team Bans</h3>
-              <p className={styles.small}>{draft.team200_bans.join(" · ")}</p>
-              <h3 style={{ marginTop: "10px" }}>Red Team Picks</h3>
-              <p className={styles.small}>{draft.team200_picks.join(" · ")}</p>
-            </article>
-          </div>
+          {!draft ? (
+            <p className={styles.emptyState}>
+              No draft data — run <code>POST /backfill/draft-actions</code>.
+            </p>
+          ) : (
+            <div className={styles.twoCol}>
+              <article className={styles.dataCard}>
+                <h3>Blue Team Bans</h3>
+                <p className={styles.small}>{draft.team100_bans.join(" · ")}</p>
+                <h3 style={{ marginTop: "10px" }}>Blue Team Picks</h3>
+                <p className={styles.small}>{draft.team100_picks.join(" · ")}</p>
+              </article>
+              <article className={styles.dataCard}>
+                <h3>Red Team Bans</h3>
+                <p className={styles.small}>{draft.team200_bans.join(" · ")}</p>
+                <h3 style={{ marginTop: "10px" }}>Red Team Picks</h3>
+                <p className={styles.small}>{draft.team200_picks.join(" · ")}</p>
+              </article>
+            </div>
+          )}
         </section>
 
         <section className={styles.section}>

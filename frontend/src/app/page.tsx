@@ -39,6 +39,12 @@ export default function HomePage() {
               description="Compare two 5-player teams for matchup-based analysis."
               ctaLabel="Open Matchup Flow"
             />
+            <ActionCard
+              href="/champions"
+              title="Champion Browser"
+              description="Explore the full champion roster with DB-backed win rates, KDA, and role affinities."
+              ctaLabel="Browse Champions"
+            />
           </div>
         </section>
       </div>

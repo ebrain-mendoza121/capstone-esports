@@ -7,9 +7,9 @@ interface RosterInputGroupProps {
   description: string;
   players: PlayerInsightInputForm[];
   idPrefix: string;
-  championOptions: string[];
-  loadingChampionOptions?: boolean;
   platform: string;
+  championOptions: string[];
+  loadingChampions?: boolean;
   onPlatformChange: (platform: string) => void;
   onPlayerChange: (playerIndex: number, field: keyof PlayerInsightInputForm, value: string) => void;
 }
@@ -19,9 +19,9 @@ export default function RosterInputGroup({
   description,
   players,
   idPrefix,
-  championOptions,
-  loadingChampionOptions = false,
   platform,
+  championOptions,
+  loadingChampions = false,
   onPlatformChange,
   onPlayerChange,
 }: RosterInputGroupProps) {
@@ -29,6 +29,7 @@ export default function RosterInputGroup({
     <article className={styles.sectionCard}>
       <h2 className={styles.sectionTitle}>{title}</h2>
       <p className={`${styles.sectionText} ${styles.rosterDescription}`}>{description}</p>
+
       <div className={`${styles.fieldGroup} ${styles.platformField}`}>
         <label className={styles.label} htmlFor={`${idPrefix}-platform`}>
           Team Platform
@@ -41,9 +42,9 @@ export default function RosterInputGroup({
           onChange={(event) => onPlatformChange(event.target.value)}
         >
           <option value="">Select platform</option>
-          {PLATFORM_OPTIONS.map((platformOption) => (
-            <option key={platformOption.value} value={platformOption.value}>
-              {platformOption.label}
+          {PLATFORM_OPTIONS.map((p) => (
+            <option key={p.value} value={p.value}>
+              {p.label}
             </option>
           ))}
         </select>
@@ -102,25 +103,22 @@ export default function RosterInputGroup({
                 </select>
               </div>
 
-              <div className={`${styles.fieldGroup} ${styles.fieldSpanFull}`}>
+              <div className={styles.fieldGroup}>
                 <label className={styles.label} htmlFor={`${idPrefix}-${index}-champion`}>
-                  Champion
+                  Champion <span style={{ fontWeight: 400, opacity: 0.6 }}>(optional)</span>
                 </label>
                 <select
                   className={styles.select}
                   id={`${idPrefix}-${index}-champion`}
                   value={player.champion}
-                  required
-                  disabled={loadingChampionOptions || championOptions.length === 0}
+                  disabled={loadingChampions}
                   onChange={(event) => onPlayerChange(index, "champion", event.target.value)}
                 >
                   <option value="">
-                    {loadingChampionOptions ? "Loading champions..." : "Select champion"}
+                    {loadingChampions ? "Loading champions…" : "Select champion"}
                   </option>
-                  {championOptions.map((champion) => (
-                    <option key={champion} value={champion}>
-                      {champion}
-                    </option>
+                  {championOptions.map((name) => (
+                    <option key={name} value={name}>{name}</option>
                   ))}
                 </select>
               </div>

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "dev:backend": "cd ../backend && uvicorn app.main:app --reload --port 8000",
+    "dev:backend": "bash -c 'cd ../backend && .venv/bin/uvicorn app.main:app --reload --port 8000'",
     "dev:all": "concurrently --kill-others-on-fail --names \"BACKEND,FRONTEND\" --prefix-colors \"blue,green\" \"npm run dev:backend\" \"next dev\"",
     "kill:backend": "node -e \"const { execSync } = require('child_process'); try { execSync(process.platform === 'win32' ? 'netstat -ano | findstr :8000' : 'lsof -ti:8000 | xargs kill -9'); } catch(e) {}\"",
     "dev:fresh": "npm run kill:backend && npm run dev:all"

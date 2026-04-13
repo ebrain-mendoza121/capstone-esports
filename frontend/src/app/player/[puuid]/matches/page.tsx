@@ -4,7 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import styles from "@/app/mvp.module.css";
-import { MatchHistoryEntry, QueueCode, frontendMvpClient } from "@/lib/frontendMvpClient";
+import {
+  MatchHistoryEntry,
+  QueueCode,
+  WinPrediction,
+  frontendMvpClient,
+} from "@/lib/frontendMvpClient";
 
 type QueueFilter = "all" | QueueCode;
 type ResultFilter = "all" | "win" | "loss";
@@ -15,6 +20,16 @@ function formatDuration(seconds: number): string {
   return `${minutes}:${String(rem).padStart(2, "0")}`;
 }
 
+function pct(value: number | null) {
+  if (value === null || value === undefined) return "—";
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function fmt(value: number | null, decimals = 2) {
+  if (value === null || value === undefined) return "—";
+  return value.toFixed(decimals);
+}
+
 export default function MatchHistoryPage() {
   const params = useParams<{ puuid: string }>();
   const router = useRouter();
@@ -23,6 +38,8 @@ export default function MatchHistoryPage() {
   const [limit, setLimit] = useState(20);
   const [loading, setLoading] = useState(true);
   const [matches, setMatches] = useState<MatchHistoryEntry[]>([]);
+  const [predictions, setPredictions] = useState<Record<string, WinPrediction>>({});
+  const [loadingPredictions, setLoadingPredictions] = useState(false);
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
   const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
 
@@ -32,32 +49,35 @@ export default function MatchHistoryPage() {
     const loadMatches = async () => {
       setLoading(true);
       const response = await frontendMvpClient.getMatchesByPlayer(puuid, limit);
-
-      if (!mounted) {
-        return;
-      }
-
+      if (!mounted) return;
       setMatches(response);
       setLoading(false);
+
+      // Load win predictions for all matches in parallel
+      setLoadingPredictions(true);
+      const predResults = await Promise.allSettled(
+        response.map((m) => frontendMvpClient.getWinPrediction(puuid, m.match_id))
+      );
+      if (!mounted) return;
+      const predMap: Record<string, WinPrediction> = {};
+      predResults.forEach((result, idx) => {
+        if (result.status === "fulfilled") {
+          predMap[response[idx].match_id] = result.value;
+        }
+      });
+      setPredictions(predMap);
+      setLoadingPredictions(false);
     };
 
     void loadMatches();
-
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [limit, puuid]);
 
   const filteredMatches = useMemo(() => {
     return matches.filter((match) => {
       const queuePass = queueFilter === "all" ? true : match.queue_id === queueFilter;
       const resultPass =
-        resultFilter === "all"
-          ? true
-          : resultFilter === "win"
-            ? match.win
-            : !match.win;
-
+        resultFilter === "all" ? true : resultFilter === "win" ? match.win : !match.win;
       return queuePass && resultPass;
     });
   }, [matches, queueFilter, resultFilter]);
@@ -66,19 +86,23 @@ export default function MatchHistoryPage() {
     <main className={styles.page}>
       <div className={styles.container}>
         <header className={styles.hero}>
-          <p className={styles.eyebrow}>Frontend MVP · Page 3</p>
-          <h1 className={styles.title}>Match History</h1>
+          <p className={styles.eyebrow}>Player · Match History</p>
+          <div className={styles.heroTitleRow}>
+            <h1 className={styles.title}>Match History</h1>
+            <Link className={styles.linkChip} href={`/player/${puuid}`}>
+              ← Back to Dashboard
+            </Link>
+          </div>
         </header>
 
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <div>
               <h2 className={styles.sectionTitle}>Filters</h2>
-              <p className={styles.sectionCopy}>Client-side queue/result filters + load more paging</p>
             </div>
-            <Link className={styles.linkChip} href={`/player/${puuid}`}>
-              Back to Dashboard
-            </Link>
+            <span className={styles.badgeNeutral}>
+              {loadingPredictions ? "Loading AI predictions…" : `${filteredMatches.length} rows`}
+            </span>
           </div>
 
           <div className={styles.threeCol}>
@@ -87,9 +111,9 @@ export default function MatchHistoryPage() {
               <select
                 className={styles.select}
                 value={queueFilter}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setQueueFilter(value === "all" ? "all" : Number(value) as QueueCode);
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setQueueFilter(v === "all" ? "all" : (Number(v) as QueueCode));
                 }}
               >
                 <option value="all">All</option>
@@ -103,7 +127,7 @@ export default function MatchHistoryPage() {
               <select
                 className={styles.select}
                 value={resultFilter}
-                onChange={(event) => setResultFilter(event.target.value as ResultFilter)}
+                onChange={(e) => setResultFilter(e.target.value as ResultFilter)}
               >
                 <option value="all">All</option>
                 <option value="win">Win</option>
@@ -111,7 +135,11 @@ export default function MatchHistoryPage() {
               </select>
             </label>
 
-            <button className={styles.buttonPrimary} type="button" onClick={() => setLimit((value) => value + 20)}>
+            <button
+              className={styles.buttonPrimary}
+              type="button"
+              onClick={() => setLimit((v) => v + 20)}
+            >
               Load More
             </button>
           </div>
@@ -120,14 +148,15 @@ export default function MatchHistoryPage() {
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <div>
-              <h2 className={styles.sectionTitle}>Recent Matches</h2>
-              <p className={styles.sectionCopy}>Recent matches based on the current filters and load limit.</p>
+              <h2 className={styles.sectionTitle}>Matches</h2>
+              <p className={styles.sectionCopy}>
+                Win Prob. column shows AI model output — shows "—" until model is trained.
+              </p>
             </div>
-            <span className={styles.badgeNeutral}>{filteredMatches.length} rows</span>
           </div>
 
           {loading ? (
-            <p className={styles.loading}>Loading match rows...</p>
+            <p className={styles.loading}>Loading matches…</p>
           ) : (
             <div className={styles.tableWrap}>
               <table className={styles.table}>
@@ -137,47 +166,71 @@ export default function MatchHistoryPage() {
                     <th>Role</th>
                     <th>K/D/A</th>
                     <th>CS</th>
+                    <th>CS/Min</th>
                     <th>Gold</th>
+                    <th>Gold/Min</th>
+                    <th>Damage</th>
+                    <th>Dmg Share</th>
+                    <th>Kill Part.</th>
                     <th>Vision</th>
-                    <th>Items</th>
+                    <th>Wards</th>
+                    <th>KDA</th>
+                    <th>Win Prob.</th>
                     <th>Result</th>
                     <th>Duration</th>
                     <th>Patch</th>
-                    <th>KDA</th>
-                    <th>CS/Min</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredMatches.map((match) => (
-                    <tr key={match.match_id}>
-                      <td>
-                        <button
-                          className={styles.rowButton}
-                          type="button"
-                          onClick={() => router.push(`/match/${match.match_id}`)}
-                        >
-                          {match.champion}
-                        </button>
-                      </td>
-                      <td>{match.role}</td>
-                      <td>
-                        {match.kills}/{match.deaths}/{match.assists}
-                      </td>
-                      <td>{match.cs}</td>
-                      <td>{match.gold_earned.toLocaleString()}</td>
-                      <td>{match.vision_score}</td>
-                      <td>{match.items.slice(0, 7).join(" · ")}</td>
-                      <td>
-                        <span className={match.win ? styles.badgeWin : styles.badgeLoss}>
-                          {match.win ? "Win" : "Loss"}
-                        </span>
-                      </td>
-                      <td>{formatDuration(match.game_duration)}</td>
-                      <td>{match.patch_version}</td>
-                      <td>{match.kda}</td>
-                      <td>{match.cs_per_min}</td>
-                    </tr>
-                  ))}
+                  {filteredMatches.map((match) => {
+                    const pred = predictions[match.match_id];
+                    const winProb =
+                      pred?.model_trained && pred?.win_probability !== null
+                        ? `${(pred.win_probability * 100).toFixed(1)}%`
+                        : "—";
+
+                    return (
+                      <tr key={match.match_id}>
+                        <td>
+                          <button
+                            className={styles.rowButton}
+                            type="button"
+                            onClick={() => router.push(`/match/${match.match_id}`)}
+                          >
+                            {match.champion}
+                          </button>
+                        </td>
+                        <td>{match.role}</td>
+                        <td>{match.kills}/{match.deaths}/{match.assists}</td>
+                        <td>{match.cs}</td>
+                        <td>{fmt(match.cs_per_min)}</td>
+                        <td>{match.gold_earned.toLocaleString()}</td>
+                        <td>{fmt(match.gold_per_min, 0)}</td>
+                        <td>{match.total_damage?.toLocaleString() ?? "—"}</td>
+                        <td>{pct(match.damage_share)}</td>
+                        <td>{pct(match.kill_participation)}</td>
+                        <td>{match.vision_score}</td>
+                        <td>{match.wards_placed ?? "—"}</td>
+                        <td>{fmt(match.kda)}</td>
+                        <td>
+                          <span className={
+                            pred?.model_trained && pred?.win_probability !== null
+                              ? (pred.win_probability >= 0.5 ? styles.badgeWin : styles.badgeLoss)
+                              : styles.badge
+                          }>
+                            {winProb}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={match.win ? styles.badgeWin : styles.badgeLoss}>
+                            {match.win ? "Win" : "Loss"}
+                          </span>
+                        </td>
+                        <td>{formatDuration(match.game_duration)}</td>
+                        <td>{match.patch_version}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

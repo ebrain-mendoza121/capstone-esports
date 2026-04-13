@@ -9,6 +9,7 @@ const navItems = [
   { href: "/individual-stats", label: "Individual Stats" },
   { href: "/team-insights", label: "Team Insights" },
   { href: "/matchup-insights", label: "Matchup Insights" },
+  { href: "/champions", label: "Champions" },
 ];
 
 function isActive(pathname: string, href: string): boolean {

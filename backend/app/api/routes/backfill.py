@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import text
 from typing import Optional
 
 from app.db.session import get_db
@@ -30,6 +31,7 @@ router = APIRouter(prefix="/backfill", tags=["backfill"])
 @router.post("/derived")
 def backfill_derived_metrics(
     puuid: Optional[str] = None,
+    limit: int = 500,
     db: Session = Depends(get_db),
 ):
     """
@@ -38,8 +40,14 @@ def backfill_derived_metrics(
 
     Computes entirely from data already stored in participant_stats and
     matches — no Riot API calls are made, so there is no rate-limit risk.
+
+    Performance: uses two bulk SELECTs + one bulk INSERT … ON CONFLICT DO UPDATE
+    regardless of how many rows are processed (no N+1 queries).
     """
-    # Find all (match_id, player_id, puuid) combos missing a derived_metrics row.
+    # ------------------------------------------------------------------
+    # Step 1 — find (match_id, game_duration, player_id, puuid) combos
+    #           that are missing a derived_metrics row.
+    # ------------------------------------------------------------------
     query = (
         db.query(Match.match_id, Match.game_duration, ParticipantStats.player_id, Player.puuid)
         .join(ParticipantStats, ParticipantStats.match_id == Match.match_id)
@@ -55,7 +63,8 @@ def backfill_derived_metrics(
     if puuid:
         query = query.filter(Player.puuid == puuid)
 
-    missing_records = query.all()
+    limit = min(limit, 5000)
+    missing_records = query.limit(limit).all()
 
     if not missing_records:
         return {
@@ -66,41 +75,51 @@ def backfill_derived_metrics(
             "failed_matches": [],
         }
 
-    processed = 0
+    # ------------------------------------------------------------------
+    # Step 2 — bulk-load ALL participant_stats for every affected match
+    #           in a single IN query, then group by match_id in Python.
+    # ------------------------------------------------------------------
+    unique_match_ids = list({r.match_id for r in missing_records})
+    all_ps_rows = (
+        db.query(ParticipantStats)
+        .filter(ParticipantStats.match_id.in_(unique_match_ids))
+        .all()
+    )
+
+    from collections import defaultdict
+    ps_by_match: dict = defaultdict(list)
+    for ps in all_ps_rows:
+        ps_by_match[ps.match_id].append(ps)
+
+    def _ps_to_dict(ps: ParticipantStats) -> dict:
+        return {
+            "kills":                       ps.kills or 0,
+            "deaths":                      ps.deaths or 0,
+            "assists":                     ps.assists or 0,
+            "goldEarned":                  ps.gold_earned or 0,
+            "totalDamageDealtToChampions": ps.total_damage or 0,
+            "visionScore":                 ps.vision_score or 0,
+            "totalMinionsKilled":          ps.total_minions_killed or 0,
+            "neutralMinionsKilled":        ps.neutral_minions_killed or 0,
+            "teamId":                      ps.team_id or 0,
+            "teamPosition":                ps.role,
+        }
+
+    # ------------------------------------------------------------------
+    # Step 3 — compute metrics in Python (pure CPU, no DB round-trips).
+    # ------------------------------------------------------------------
+    rows_to_insert: list[dict] = []
     failed = 0
-    failed_matches = []
+    failed_matches: list[str] = []
 
     for match_id, game_duration_seconds, player_id, player_puuid in missing_records:
         try:
-            # Load all participant_stats rows for this match so we can compute
-            # team-level aggregates (team kills, team damage) without Riot API.
-            all_ps = (
-                db.query(ParticipantStats)
-                .filter(ParticipantStats.match_id == match_id)
-                .all()
-            )
-
+            all_ps = ps_by_match.get(match_id, [])
             target = next((p for p in all_ps if p.player_id == player_id), None)
             if not target:
                 failed += 1
-                failed_matches.append(f"{match_id}: player_id {player_id} not in participant_stats")
+                failed_matches.append(f"{match_id}: player_id {player_id} not found")
                 continue
-
-            # Build lightweight dicts matching compute_derived_metrics expectations.
-            def _ps_to_dict(ps: ParticipantStats) -> dict:
-                return {
-                    "kills":                        ps.kills or 0,
-                    "deaths":                       ps.deaths or 0,
-                    "assists":                      ps.assists or 0,
-                    "goldEarned":                   ps.gold_earned or 0,
-                    "totalDamageDealtToChampions":  ps.total_damage or 0,
-                    "visionScore":                  ps.vision_score or 0,
-                    "totalMinionsKilled":           ps.total_minions_killed or 0,
-                    "neutralMinionsKilled":         ps.neutral_minions_killed or 0,
-                    "teamId":                       ps.team_id or 0,
-                    # Role fields — stored on participant_stats
-                    "teamPosition":                 ps.role,
-                }
 
             participant_dict = _ps_to_dict(target)
             team_id = target.team_id or 0
@@ -111,24 +130,45 @@ def backfill_derived_metrics(
                 team_dicts,
                 game_duration_seconds or 0,
             )
-
-            stmt = insert(DerivedMetrics).values(
-                match_id=match_id,
-                puuid=player_puuid,
-                **metrics,
-            )
-            stmt = stmt.on_conflict_do_update(
-                constraint="uq_derived_metrics_match_puuid",
-                set_=metrics,
-            )
-            db.execute(stmt)
-            processed += 1
+            rows_to_insert.append({"match_id": match_id, "puuid": player_puuid, **metrics})
 
         except Exception as exc:
             failed += 1
             failed_matches.append(f"{match_id}: {exc}")
 
-    db.commit()
+    # ------------------------------------------------------------------
+    # Step 4 — bulk INSERT … ON CONFLICT DO UPDATE.
+    #
+    # Two problems to avoid:
+    #  a) psycopg3 executemany pipelines rows individually → cumulative
+    #     wall-time trips PostgreSQL's statement_timeout.
+    #  b) A single 5000-row VALUES list can also be slow on large indexes.
+    #
+    # Fix: disable statement_timeout for this session (SET LOCAL only
+    # affects the current transaction), then insert in chunks of 500
+    # using the Core Table (not the ORM class) so SQLAlchemy emits one
+    # true multi-row INSERT … VALUES (…),(…),… per chunk — not executemany.
+    # ------------------------------------------------------------------
+    processed = 0
+    if rows_to_insert:
+        metrics_keys = [k for k in rows_to_insert[0] if k not in ("match_id", "puuid")]
+        _table = DerivedMetrics.__table__
+
+        # Lift the PG statement timeout for this transaction only.
+        db.execute(text("SET LOCAL statement_timeout = 0"))
+
+        chunk_size = 500
+        for i in range(0, len(rows_to_insert), chunk_size):
+            chunk = rows_to_insert[i : i + chunk_size]
+            stmt = insert(_table).values(chunk)
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_derived_metrics_match_puuid",
+                set_={k: stmt.excluded[k] for k in metrics_keys},
+            )
+            db.execute(stmt)
+
+        db.commit()
+        processed = len(rows_to_insert)
 
     return {
         "status": "success" if failed == 0 else "partial",

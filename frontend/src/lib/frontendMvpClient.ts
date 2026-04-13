@@ -6,6 +6,7 @@ export interface PlayerSummary {
   riot_id: string;
   tag_line: string;
   region: string;
+  match_count: number;
 }
 
 export interface IngestPlayerInput {
@@ -27,6 +28,92 @@ export interface PlayerMetrics {
   avg_cs_per_min: number;
   avg_gold_per_min: number;
   avg_vision_per_min: number;
+  kill_participation: number;
+  damage_share: number;
+}
+
+export interface RolePerformanceEntry {
+  role: string;
+  games_played: number;
+  win_rate: number;
+  avg_kda: number;
+  avg_cs_per_min: number;
+  avg_kill_part: number;
+  avg_vision: number;
+  vs_peers: {
+    global_win_rate: number;
+    global_avg_kda: number;
+    global_avg_cs: number;
+    win_rate_vs_peers: string;
+    cs_vs_peers: string;
+    kda_delta: number;
+    cs_delta: number;
+    wr_delta: number;
+  };
+}
+
+export interface PlayerRolePerformance {
+  puuid: string;
+  primary_role: string | null;
+  roles: RolePerformanceEntry[];
+}
+
+export interface PlaystyleResult {
+  puuid: string;
+  cluster_id: number;
+  playstyle_label: string;
+  meets_min_sample: boolean;
+  games_played: number;
+  feature_snapshot: Record<string, number>;
+  model_trained_at: string | null;
+}
+
+export interface ChampionRecommendation {
+  champion_id: number;
+  champion_name: string;
+  role: string | null;
+  score: number;
+  games_played: number;
+  win_rate: number;
+  smoothed_win_rate: number;
+  playstyle_match: boolean;
+}
+
+export interface TrendGamePoint {
+  match_id: string;
+  game_creation: number;
+  champion: string | null;
+  role: string | null;
+  win: boolean;
+  kda: number | null;
+  cs_per_min: number | null;
+  gold_per_min: number | null;
+  kill_participation: number | null;
+  vision_per_min: number | null;
+  kills: number | null;
+  deaths: number | null;
+  assists: number | null;
+}
+
+export interface PlayerTrends {
+  puuid: string;
+  summoner_name: string;
+  games_in_window: number;
+  has_full_window: boolean;
+  message?: string;
+  rolling: {
+    win_rate_20: number;
+    avg_kda_20: number;
+    avg_cs_per_min_20: number;
+    avg_gold_per_min_20: number;
+    avg_kill_part_20: number;
+    death_rate_20: number;
+    vision_per_min_20: number;
+    kda_std_10: number;
+    cs_trend_10: number;
+    win_streak: number;
+  } | null;
+  series: TrendGamePoint[];
 }
 
 export interface RuneEntry {
@@ -57,9 +144,62 @@ export interface MatchHistoryEntry {
   win: boolean;
   game_duration: number;
   patch_version: string;
-  kda: number;
-  cs_per_min: number;
+  kda: number | null;
+  cs_per_min: number | null;
   queue_id: QueueCode;
+  // derived metrics — null when backfill hasn't run yet
+  total_damage: number | null;
+  kill_participation: number | null;
+  damage_share: number | null;
+  gold_per_min: number | null;
+  vision_per_min: number | null;
+  wards_placed: number | null;
+  penta_kills: number | null;
+  first_blood_kill: boolean | null;
+}
+
+export interface WinPrediction {
+  puuid: string;
+  match_id: string;
+  model_trained: boolean;
+  win_probability: number | null;
+  confidence: string;
+  prior_games: number;
+}
+
+export interface KdaPrediction {
+  puuid: string;
+  match_id: string;
+  model_trained: boolean;
+  expected_kda: number | null;
+  confidence: string;
+}
+
+export interface CsPrediction {
+  puuid: string;
+  match_id: string;
+  model_trained: boolean;
+  expected_cs_per_min: number | null;
+  confidence: string;
+}
+
+export interface EarlyGamePrediction {
+  match_id: string;
+  model_trained: boolean;
+  team100_win_probability: number | null;
+  confidence: string;
+  error?: string;
+}
+
+export interface ModelStatusEntry {
+  trained: boolean;
+  trained_at: string | null;
+  version: string | null;
+  metrics: Record<string, number | string>;
+}
+
+export interface ModelsStatus {
+  [modelName: string]: ModelStatusEntry;
 }
 
 export interface TeamStats {
@@ -190,20 +330,29 @@ export class MockApiError extends Error {
 
 export interface FrontendMvpClient {
   // Page 1
-  listPlayers(): Promise<PlayerSummary[]>;
+  listPlayers(minMatches?: number): Promise<PlayerSummary[]>;
   ingestPlayer(payload: IngestPlayerInput): Promise<PlayerSummary>;
 
   // Page 2
   getPlayer(puuid: string): Promise<PlayerDetail>;
   getPlayerMetrics(puuid: string): Promise<PlayerMetrics>;
   getPlayerRunes(puuid: string, limit: number): Promise<RuneEntry[]>;
+  getPlayerRolePerformance(puuid: string): Promise<PlayerRolePerformance>;
+  getPlayerPlaystyle(puuid: string): Promise<PlaystyleResult | null>;
+  getChampionRecommendations(puuid: string, topN?: number): Promise<ChampionRecommendation[]>;
+  getPlayerTrends(puuid: string, window?: number): Promise<PlayerTrends>;
 
   // Page 3
   getMatchesByPlayer(puuid: string, limit: number): Promise<MatchHistoryEntry[]>;
+  getWinPrediction(puuid: string, matchId: string): Promise<WinPrediction>;
+  getKdaPrediction(puuid: string, matchId: string): Promise<KdaPrediction>;
+  getCsPrediction(puuid: string, matchId: string): Promise<CsPrediction>;
 
   // Page 4
   getMatch(matchId: string): Promise<MatchDetail>;
   getMatchDraft(matchId: string): Promise<DraftData>;
+  getEarlyGamePrediction(matchId: string): Promise<EarlyGamePrediction>;
+  getModelsStatus(): Promise<ModelsStatus>;
 
   // Page 5
   getPlayerBanAnalytics(puuid: string, limit: number): Promise<PlayerBanAnalytics>;
@@ -354,43 +503,60 @@ async function resolvePlayer(puuid: string){
     riot_id: player.riot_id,
     tag_line: player.tag_line,
     region: player.region,
+    match_count: player.match_count ?? 0,
     created_at: player.created_at
   };
 }
 
 const frontendMvpClient: FrontendMvpClient = {
-  async listPlayers() {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/players/`);
+  async listPlayers(minMatches = 10) {
+    const url = `${process.env.NEXT_PUBLIC_API_URL}/players/?min_matches=${minMatches}`;
+    const res = await fetch(url);
     if (!res.ok) {
       throw new Error("Failed to fetch player list from Riot API");
     }
     const players = await res.json();
-    return players.slice(0, 20); // Return only the first 20 for listing
+    return players as PlayerSummary[];
   },
 
   async ingestPlayer(payload) {
-    if (payload.gameName.toLowerCase() === "404") {
-      throw new MockApiError(404, "Player not found on Riot servers");
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ingest/player`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        gameName: payload.gameName,
+        tagLine: payload.tagLine,
+        platform: payload.platform,
+        count: payload.matchCount,
+        queue: payload.queue,
+      }),
+    });
+
+    if (!res.ok) {
+      let detail = "";
+      try { detail = (await res.json()).detail ?? ""; } catch { /* ignore */ }
+      if (res.status === 404) throw new MockApiError(404, detail || "Player not found on Riot servers");
+      if (res.status === 503) throw new MockApiError(503, detail || "Riot API rate limit hit — try again in 30 seconds");
+      if (res.status === 502) throw new MockApiError(502, detail || "Riot API error — check API key");
+      throw new Error(detail || "Unexpected ingest error");
     }
 
-    if (payload.gameName.toLowerCase() === "503") {
-      throw new MockApiError(503, "Riot API rate limit hit — try again in 30 seconds");
-    }
+    const data = await res.json() as {
+      puuid: string;
+      platform: string;
+      routing: string;
+      inserted: number;
+      skipped: number;
+      failed: string[];
+    };
 
-    if (payload.gameName.toLowerCase() === "502") {
-      throw new MockApiError(502, "Riot API error — check API key");
-    }
-
-    const puuid = await getPuuidFromRiotId(payload.gameName, payload.tagLine) || "";
-
-    const player: PlayerSummary = {
-      puuid,
+    return {
+      puuid: data.puuid,
       riot_id: payload.gameName,
       tag_line: payload.tagLine,
       region: payload.platform,
+      match_count: data.inserted,
     };
-
-    return player;
   },
 
   async getPlayer(puuid) {
@@ -414,6 +580,8 @@ const frontendMvpClient: FrontendMvpClient = {
       avg_cs_per_min: metrics.cs_per_min,
       avg_gold_per_min: metrics.gold_per_min,
       avg_vision_per_min: metrics.vision_per_min,
+      kill_participation: metrics.kill_participation ?? 0,
+      damage_share: metrics.damage_share ?? 0,
     };
   },
 
@@ -426,6 +594,26 @@ const frontendMvpClient: FrontendMvpClient = {
     return [...runes.runes];
   },
 
+  async getPlayerRolePerformance(puuid) {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/role-performance`);
+    if (!res.ok) throw new Error("Failed to fetch role performance");
+    return res.json() as Promise<PlayerRolePerformance>;
+  },
+
+  async getPlayerPlaystyle(puuid) {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/playstyle/${puuid}`);
+    // 503 = model not trained yet — return null instead of throwing
+    if (res.status === 503) return null;
+    if (!res.ok) throw new Error("Failed to fetch playstyle");
+    return res.json() as Promise<PlaystyleResult>;
+  },
+
+  async getChampionRecommendations(puuid, topN = 10) {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/champions/${puuid}?top_n=${topN}`);
+    if (!res.ok) throw new Error("Failed to fetch champion recommendations");
+    return res.json() as Promise<ChampionRecommendation[]>;
+  },
+
   async getMatchesByPlayer(puuid, limit) {
     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/matches/player/${puuid}/?limit=${limit}`);
     if (!res.ok) {
@@ -434,6 +622,24 @@ const frontendMvpClient: FrontendMvpClient = {
     const matches = await res.json();
 
     return [...matches];
+  },
+
+  async getWinPrediction(puuid, matchId) {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/predict/${puuid}/${matchId}`);
+    if (!res.ok) throw new Error("Failed to fetch win prediction");
+    return res.json() as Promise<WinPrediction>;
+  },
+
+  async getKdaPrediction(puuid, matchId) {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/predict/kda/${puuid}/${matchId}`);
+    if (!res.ok) throw new Error("Failed to fetch KDA prediction");
+    return res.json() as Promise<KdaPrediction>;
+  },
+
+  async getCsPrediction(puuid, matchId) {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/predict/cs/${puuid}/${matchId}`);
+    if (!res.ok) throw new Error("Failed to fetch CS prediction");
+    return res.json() as Promise<CsPrediction>;
   },
 
   async getMatch(matchId) {
@@ -465,6 +671,18 @@ const frontendMvpClient: FrontendMvpClient = {
       (pick: { champion_id: number }) => pick.champion_id
     ),
   }
+  },
+
+  async getEarlyGamePrediction(matchId) {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/early-game/${matchId}`);
+    if (!res.ok) throw new Error("Failed to fetch early game prediction");
+    return res.json() as Promise<EarlyGamePrediction>;
+  },
+
+  async getModelsStatus() {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/models/status`);
+    if (!res.ok) throw new Error("Failed to fetch models status");
+    return res.json() as Promise<ModelsStatus>;
   },
 
   async getPlayerBanAnalytics(puuid, limit) {
@@ -583,7 +801,17 @@ const frontendMvpClient: FrontendMvpClient = {
     });
   },
 
-async getTimelineEvents(matchId, limit, cursor) {
+async getPlayerTrends(puuid, window = 20) {
+    const res = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/trends?window=${window}`
+    );
+    if (!res.ok) {
+      throw new Error(`Failed to fetch trends (${res.status})`);
+    }
+    return (await res.json()) as PlayerTrends;
+  },
+
+  async getTimelineEvents(matchId, limit, cursor) {
   const url =
     `${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/events/?limit=${limit}` +
     (cursor ? `&cursor=${cursor}` : "");

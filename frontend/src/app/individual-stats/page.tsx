@@ -12,12 +12,13 @@ import {
   QueueCode,
   frontendMvpClient,
 } from "@/lib/frontendMvpClient";
+import { PLATFORM_OPTIONS } from "@/lib/lolData";
 import styles from "@/styles/analytics-flow.module.css";
 
 const defaultForm: IngestPlayerInput = {
   gameName: "",
   tagLine: "",
-  platform: "NA1",
+  platform: "NA",
   matchCount: 20,
   queue: 420,
 };
@@ -132,10 +133,9 @@ export default function IndividualStatsPage() {
                 value={form.platform}
                 onChange={(event) => setForm({ ...form, platform: event.target.value })}
               >
-                <option value="NA1">NA1</option>
-                <option value="EUW1">EUW1</option>
-                <option value="KR">KR</option>
-                <option value="LA1">LA1</option>
+                {PLATFORM_OPTIONS.map((p) => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
               </select>
             </div>
 
@@ -171,7 +171,6 @@ export default function IndividualStatsPage() {
           </div>
 
           <div className={styles.inlineActionRow}>
-            <p className={styles.helper}>Tip: Enter `404`, `503`, or `502` as Game Name to test error states.</p>
             <button className={styles.buttonPrimary} type="submit" disabled={submitting}>
               {submitting ? "Ingesting..." : "Ingest & Open Dashboard"}
             </button>
@@ -181,14 +180,16 @@ export default function IndividualStatsPage() {
 
       <section className={styles.sectionCard}>
         <h2 className={styles.sectionTitle}>Results</h2>
-        <p className={styles.sectionText}>Existing profiles ready to open in the individual dashboard.</p>
+        <p className={styles.sectionText}>
+          Showing players with 10+ matches — sorted by most matches. Ghost participants (opponents from ingested matches with fewer than 10 games) are hidden.
+        </p>
 
         <hr className={styles.divider} />
 
         {loadingPlayers ? <p className={styles.statusInfo}>Loading player registry...</p> : null}
 
         {!loadingPlayers && players.length === 0 ? (
-          <p className={styles.emptyState}>No players ingested yet. Submit the form above to create your first profile.</p>
+          <p className={styles.emptyState}>No players with 10+ matches yet. Ingest a player above with matchCount ≥ 10 to get started.</p>
         ) : null}
 
         {!loadingPlayers && players.length > 0 ? (
@@ -199,6 +200,7 @@ export default function IndividualStatsPage() {
                   <th>Riot ID</th>
                   <th>Tag</th>
                   <th>Region</th>
+                  <th>Matches</th>
                   <th>Open</th>
                 </tr>
               </thead>
@@ -208,6 +210,7 @@ export default function IndividualStatsPage() {
                     <td>{player.riot_id}</td>
                     <td>#{player.tag_line}</td>
                     <td>{player.region}</td>
+                    <td>{player.match_count}</td>
                     <td>
                       <button
                         className={styles.buttonSecondary}

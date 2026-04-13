@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Dict, List, Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +13,7 @@ from app.models.participant_stats import ParticipantStats
 from app.models.team_bans import TeamBans
 from app.models.participant_perks import ParticipantPerks
 from app.services.ddragon import get_champion_map, get_rune_map
+from app.services.feature_extractor import get_rolling_features
 
 logger = logging.getLogger(__name__)
 
@@ -384,4 +386,120 @@ async def get_role_performance(
         "puuid":        puuid,
         "primary_role": primary_role,
         "roles":        roles_out,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Performance Trends — rolling window stats + per-game series for charting
+# ---------------------------------------------------------------------------
+
+@router.get("/player/{puuid}/trends")
+def get_player_trends(
+    puuid: str,
+    window: int = 20,
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    Return rolling performance stats and a per-game time series for one player.
+
+    Rolling aggregates (``window`` most recent ranked games) come from
+    ``feature_extractor.get_rolling_features()`` — the same feature vector
+    used by every ML model, ensuring front-end numbers are consistent with
+    what the models see.
+
+    Also returns a game-by-game series (KDA, CS/min, win/loss, champion)
+    so the frontend can render a trend sparkline or line chart.
+
+    Query params:
+        window (int, default 20): rolling window size (also controls series length)
+    """
+    player = db.query(Player).filter(Player.puuid == puuid).first()
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    # Use "now" as the cutoff so we get the player's current rolling state
+    before_ts = int(time.time() * 1000)  # milliseconds, consistent with game_creation
+
+    rolling = get_rolling_features(db, puuid, before_ts=before_ts, window=window)
+
+    if not rolling:
+        return {
+            "puuid":         puuid,
+            "summoner_name": player.riot_id,
+            "games_in_window": 0,
+            "has_full_window": False,
+            "rolling": None,
+            "series":  [],
+            "message": f"Fewer than 5 ranked games found. Ingest more matches to see trends.",
+        }
+
+    # Per-game series for charting (same window, chronological order)
+    series_sql = text("""
+        SELECT
+            m.match_id,
+            m.game_creation,
+            ps.champion,
+            ps.role,
+            ps.win,
+            dm.kda,
+            dm.cs_per_min,
+            dm.gold_per_min,
+            dm.kill_participation,
+            dm.vision_per_min,
+            ps.kills,
+            ps.deaths,
+            ps.assists
+        FROM participant_stats ps
+        JOIN players p          ON p.id = ps.player_id
+        JOIN matches m          ON m.match_id = ps.match_id
+        JOIN derived_metrics dm ON dm.match_id = ps.match_id
+                               AND dm.puuid = p.puuid
+        WHERE p.puuid      = :puuid
+          AND m.queue_id   = 420
+        ORDER BY m.game_creation DESC
+        LIMIT :window
+    """)
+
+    series_rows = db.execute(
+        series_sql, {"puuid": puuid, "window": window}
+    ).mappings().all()
+
+    # Return oldest-first so chart renders left→right as time progresses
+    series = [
+        {
+            "match_id":        r["match_id"],
+            "game_creation":   r["game_creation"],
+            "champion":        r["champion"],
+            "role":            r["role"],
+            "win":             bool(r["win"]),
+            "kda":             round(float(r["kda"]), 2) if r["kda"] is not None else None,
+            "cs_per_min":      round(float(r["cs_per_min"]), 2) if r["cs_per_min"] is not None else None,
+            "gold_per_min":    round(float(r["gold_per_min"]), 1) if r["gold_per_min"] is not None else None,
+            "kill_participation": round(float(r["kill_participation"]), 3) if r["kill_participation"] is not None else None,
+            "vision_per_min":  round(float(r["vision_per_min"]), 3) if r["vision_per_min"] is not None else None,
+            "kills":           r["kills"],
+            "deaths":          r["deaths"],
+            "assists":         r["assists"],
+        }
+        for r in reversed(series_rows)  # oldest first
+    ]
+
+    return {
+        "puuid":           puuid,
+        "summoner_name":   player.riot_id,
+        "games_in_window": rolling.get("games_in_window", 0),
+        "has_full_window": rolling.get("has_full_window", False),
+        "rolling": {
+            "win_rate_20":         rolling.get("win_rate_20"),
+            "avg_kda_20":          rolling.get("avg_kda_20"),
+            "avg_cs_per_min_20":   rolling.get("avg_cs_per_min_20"),
+            "avg_gold_per_min_20": rolling.get("avg_gold_per_min_20"),
+            "avg_kill_part_20":    rolling.get("avg_kill_part_20"),
+            "death_rate_20":       rolling.get("death_rate_20"),
+            "vision_per_min_20":   rolling.get("vision_per_min_20"),
+            "kda_std_10":          rolling.get("kda_std_10"),
+            "cs_trend_10":         rolling.get("cs_trend_10"),
+            "win_streak":          rolling.get("win_streak"),
+        },
+        "series": series,
     }

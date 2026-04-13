@@ -1,6 +1,6 @@
 {
   "model_type": "logistic",
-  "trained_at": "2026-04-06T15:19:40.888556+00:00",
+  "trained_at": "2026-04-09T15:30:28.975288+00:00",
   "n_samples": 3485,
   "n_train": 2788,
   "n_test": 697,

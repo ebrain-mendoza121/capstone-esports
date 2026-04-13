@@ -570,17 +570,22 @@ async def predict_matchup(
     def _player_row(pstat: dict, declared_role: Optional[str], slot: dict) -> dict:
         games = int(pstat.get("games_in_window", 0))
         return {
-            "summoner_name":     pstat.get("summoner_name"),
-            "source":            pstat.get("source", "unknown"),
-            "role":              declared_role or pstat.get("primary_role"),
-            "games":             games,
-            "confidence":        "high" if games >= 15 else "medium" if games >= 5 else "low",
-            "win_rate_20":       pstat.get("win_rate_20"),
-            "avg_kda_20":        pstat.get("avg_kda_20"),
-            "avg_cs_per_min":    pstat.get("avg_cs_per_min_20"),
-            # Champion enrichment (null when no champion data was provided)
-            "champion_meta":     slot["champion_meta"],
-            "role_champion_fit": slot["role_champion_fit"],
+            "summoner_name":         pstat.get("summoner_name"),
+            "puuid":                 pstat.get("puuid"),
+            "source":                pstat.get("source", "unknown"),
+            "primary_role":          pstat.get("primary_role"),
+            "declared_role":         declared_role,
+            "champion_meta":         slot["champion_meta"],
+            "role_champion_fit":     slot["role_champion_fit"],
+            "games_in_window":       games,
+            "confidence":            "high" if games >= 15 else "medium" if games >= 5 else "low",
+            "win_rate_20":           pstat.get("win_rate_20"),
+            "avg_kda_20":            pstat.get("avg_kda_20"),
+            "avg_cs_per_min_20":     pstat.get("avg_cs_per_min_20"),
+            "avg_gold_per_min_20":   pstat.get("avg_gold_per_min_20"),
+            "avg_kill_part_20":      pstat.get("avg_kill_part_20"),
+            "avg_vision_per_min_20": pstat.get("avg_vision_per_min_20"),
+            "error":                 pstat.get("error"),
         }
 
     blue_players_out = [

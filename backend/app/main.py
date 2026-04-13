@@ -74,17 +74,22 @@ app.add_middleware(
 
 
 # ---------------------------------------------------------------------------
-# Request timeout middleware — kills any request that takes longer than 60s.
-# Prevents slow/hung Riot API calls from blocking workers indefinitely.
+# Request timeout middleware.
+# Normal endpoints: 60 s (prevents hung Riot API calls blocking workers).
+# Backfill endpoints: 600 s — these are CPU-only DB operations that can
+# legitimately take several minutes when processing thousands of rows.
 # Returns 504 so callers know to retry rather than wait forever.
 # ---------------------------------------------------------------------------
 @app.middleware("http")
 async def _timeout_middleware(request: Request, call_next):
+    # Admin/backfill paths get a generous timeout; everything else gets 60s
+    timeout = 600.0 if request.url.path.startswith("/backfill") else 60.0
     try:
-        return await asyncio.wait_for(call_next(request), timeout=60.0)
+        return await asyncio.wait_for(call_next(request), timeout=timeout)
     except asyncio.TimeoutError:
         logger.error(
-            "Request timed out after 60s: %s %s",
+            "Request timed out after %ss: %s %s",
+            int(timeout),
             request.method,
             request.url.path,
         )
@@ -92,7 +97,7 @@ async def _timeout_middleware(request: Request, call_next):
             status_code=504,
             content={
                 "error": "RequestTimeout",
-                "message": "The request took too long and was cancelled.",
+                "message": f"The request took longer than {int(timeout)}s and was cancelled.",
                 "path": request.url.path,
             },
         )

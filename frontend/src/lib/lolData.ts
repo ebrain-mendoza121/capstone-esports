@@ -7,10 +7,17 @@ export const LOL_ROLE_OPTIONS = [
 ] as const;
 
 export const PLATFORM_OPTIONS = [
-  { value: "NA1", label: "NA1" },
-  { value: "EUW1", label: "EUW1" },
-  { value: "KR", label: "KR" },
-  { value: "LA1", label: "LA1" },
+  { value: "NA",   label: "NA — North America" },
+  { value: "EUW",  label: "EUW — Europe West" },
+  { value: "EUNE", label: "EUNE — Europe Nordic & East" },
+  { value: "KR",   label: "KR — Korea" },
+  { value: "BR",   label: "BR — Brazil" },
+  { value: "LAN",  label: "LAN — Latin America North" },
+  { value: "LAS",  label: "LAS — Latin America South" },
+  { value: "JP",   label: "JP — Japan" },
+  { value: "OCE",  label: "OCE — Oceania" },
+  { value: "TR",   label: "TR — Turkey" },
+  { value: "RU",   label: "RU — Russia" },
 ] as const;
 
 // Fallback list used only if `/champions` is unavailable.
