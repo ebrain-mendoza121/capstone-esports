@@ -84,8 +84,9 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 @app.middleware("http")
 async def _timeout_middleware(request: Request, call_next):
-    # Admin/backfill paths get a generous timeout; everything else gets 60s
-    timeout = 600.0 if request.url.path.startswith("/backfill") else 60.0
+    # Bulk import and backfill paths get a generous timeout; everything else gets 60s
+    _long_timeout_prefixes = ("/backfill", "/matchups/import")
+    timeout = 600.0 if any(request.url.path.startswith(p) for p in _long_timeout_prefixes) else 60.0
     try:
         return await asyncio.wait_for(call_next(request), timeout=timeout)
     except asyncio.TimeoutError:

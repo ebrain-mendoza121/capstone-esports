@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from sqlalchemy import desc, func
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
@@ -223,34 +224,59 @@ async def import_matchup_csv(
             ],
         }
 
-    # --- Persist ---
+    # --- Persist: single bulk upsert — avoids N round-trips to Supabase ---
+    # One INSERT ... ON CONFLICT statement handles all rows in one DB call,
+    # which is critical for large CSVs (860 rows × ~100ms Supabase RTT = timeout).
     confidence_breakdown: Dict[str, int] = {"high": 0, "medium": 0, "low": 0}
 
-    for row_data in to_upsert:
-        existing = (
-            db.query(ChampionMatchup)
-            .filter(
-                ChampionMatchup.champion_a_id == row_data["champion_a_id"],
-                ChampionMatchup.champion_b_id == row_data["champion_b_id"],
-                ChampionMatchup.role          == row_data["role"],
+    if to_upsert:
+        stmt = pg_insert(ChampionMatchup).values(to_upsert)
+
+        # Use index_elements (column names) instead of constraint name —
+        # avoids relying on Supabase preserving the exact constraint name.
+        _conflict_cols = ["champion_a_id", "champion_b_id", "role"]
+
+        if overwrite:
+            # ON CONFLICT DO UPDATE — replace every field except the PK
+            stmt = stmt.on_conflict_do_update(
+                index_elements=_conflict_cols,
+                set_={
+                    "champion_a_name":  stmt.excluded.champion_a_name,
+                    "champion_b_name":  stmt.excluded.champion_b_name,
+                    "win_rate_a_vs_b":  stmt.excluded.win_rate_a_vs_b,
+                    "games_played":     stmt.excluded.games_played,
+                    "confidence":       stmt.excluded.confidence,
+                    "patch":            stmt.excluded.patch,
+                    "source":           stmt.excluded.source,
+                    "notes":            stmt.excluded.notes,
+                },
             )
-            .first()
-        )
-
-        if existing:
-            if overwrite:
-                for k, v in row_data.items():
-                    setattr(existing, k, v)
-                imported += 1
-                confidence_breakdown[row_data["confidence"]] += 1
-            else:
-                skipped_duplicates += 1
+            imported = len(to_upsert)
         else:
-            db.add(ChampionMatchup(**row_data))
-            imported += 1
-            confidence_breakdown[row_data["confidence"]] += 1
+            # ON CONFLICT DO NOTHING — skip existing pairs silently
+            stmt = stmt.on_conflict_do_nothing(
+                index_elements=_conflict_cols,
+            )
+            # Count actual inserts by checking what existed before
+            existing_keys = {
+                (r.champion_a_id, r.champion_b_id, r.role)
+                for r in db.query(
+                    ChampionMatchup.champion_a_id,
+                    ChampionMatchup.champion_b_id,
+                    ChampionMatchup.role,
+                ).all()
+            }
+            imported = sum(
+                1 for r in to_upsert
+                if (r["champion_a_id"], r["champion_b_id"], r["role"]) not in existing_keys
+            )
+            skipped_duplicates = len(to_upsert) - imported
 
-    db.commit()
+        db.execute(stmt)
+        db.commit()
+
+        for r in to_upsert:
+            confidence_breakdown[r["confidence"]] = confidence_breakdown.get(r["confidence"], 0) + 1
 
     logger.info(
         "Matchup CSV import: %d imported, %d skipped duplicates, %d invalid",
