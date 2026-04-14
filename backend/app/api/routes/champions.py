@@ -27,13 +27,22 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.champion_matchups import ChampionMatchup
 from app.services.ddragon import get_champion_full_map
+from app.services.champion_role_tiers import (
+    convert_ddragon_roles_to_display,
+    get_champion_role_tiers,
+    normalize_role,
+    visible_roles_from_tiers,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/champions", tags=["champions"])
 
-# Valid LoL roles accepted by filter params
-_VALID_ROLES = {"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"}
+# Valid roles for champions browse endpoints (display-oriented)
+_VALID_CHAMPION_ROLES = {"TOP", "JUNGLE", "MID", "BOTTOM", "SUPPORT"}
+
+# Valid roles for matchup endpoints (participant_stats-oriented)
+_VALID_MATCHUP_ROLES = {"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"}
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +111,7 @@ def _champion_db_stats(db: Session, champion_id: int) -> Dict[str, Any]:
 
 @router.get("")
 async def list_champions(
-    role:   Optional[str] = Query(None, description="Filter by LoL role: TOP/JUNGLE/MIDDLE/BOTTOM/UTILITY"),
+    role:   Optional[str] = Query(None, description="Filter by LoL role: TOP/JUNGLE/MID/BOTTOM/SUPPORT"),
     tag:    Optional[str] = Query(None, description="Filter by DDragon tag: Fighter/Mage/Marksman/Support/Tank/Assassin/Specialist"),
     search: Optional[str] = Query(None, description="Case-insensitive name search"),
 ) -> Dict[str, Any]:
@@ -120,20 +129,25 @@ async def list_champions(
     champ_map = await _full_map()
 
     # Normalise filters
-    role_filter   = role.upper()   if role   else None
+    role_filter   = normalize_role(role) if role else None
     tag_filter    = tag.capitalize() if tag  else None
     search_filter = search.lower() if search else None
 
-    if role_filter and role_filter not in _VALID_ROLES:
+    if role_filter and role_filter not in _VALID_CHAMPION_ROLES:
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid role '{role}'. Valid roles: {', '.join(sorted(_VALID_ROLES))}",
+            detail=f"Invalid role '{role}'. Valid roles: {', '.join(sorted(_VALID_CHAMPION_ROLES))}",
         )
 
     results: List[Dict[str, Any]] = []
     for meta in champ_map.values():
+        role_tiers = get_champion_role_tiers(meta["id"], meta["name"])
+        role_affinity = visible_roles_from_tiers(role_tiers)
+        if not role_affinity:
+            role_affinity = convert_ddragon_roles_to_display(meta["role_affinity"])
+
         # Role filter
-        if role_filter and role_filter not in meta["role_affinity"]:
+        if role_filter and role_filter not in role_affinity:
             continue
         # Tag filter
         if tag_filter and tag_filter not in meta["tags"]:
@@ -149,7 +163,8 @@ async def list_champions(
             "title":        meta["title"],
             "tags":         meta["tags"],
             "image_url":    meta["image_url"],
-            "role_affinity":meta["role_affinity"],
+            "role_affinity":role_affinity,
+            "role_tiers":   role_tiers,
         })
 
     results.sort(key=lambda c: c["name"])
@@ -176,31 +191,36 @@ async def champions_by_role(role: str) -> Dict[str, Any]:
     Convenience endpoint — return all champions whose role_affinity
     includes the given LoL role.
 
-    Example: GET /champions/by-role/MIDDLE
+    Example: GET /champions/by-role/MID
     Returns Mages and Assassins (and Specialists with mid affinity).
     """
-    role_upper = role.upper()
-    if role_upper not in _VALID_ROLES:
+    role_upper = normalize_role(role)
+    if role_upper not in _VALID_CHAMPION_ROLES:
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid role '{role}'. Valid roles: {', '.join(sorted(_VALID_ROLES))}",
+            detail=f"Invalid role '{role}'. Valid roles: {', '.join(sorted(_VALID_CHAMPION_ROLES))}",
         )
 
     champ_map = await _full_map()
 
-    results = [
-        {
+    results = []
+    for meta in champ_map.values():
+        role_tiers = get_champion_role_tiers(meta["id"], meta["name"])
+        role_affinity = visible_roles_from_tiers(role_tiers)
+        if not role_affinity:
+            role_affinity = convert_ddragon_roles_to_display(meta["role_affinity"])
+        if role_upper not in role_affinity:
+            continue
+        results.append({
             "id":           meta["id"],
             "key":          meta["key"],
             "name":         meta["name"],
             "title":        meta["title"],
             "tags":         meta["tags"],
             "image_url":    meta["image_url"],
-            "role_affinity":meta["role_affinity"],
-        }
-        for meta in champ_map.values()
-        if role_upper in meta["role_affinity"]
-    ]
+            "role_affinity":role_affinity,
+            "role_tiers":   role_tiers,
+        })
     results.sort(key=lambda c: c["name"])
 
     return {
@@ -248,10 +268,10 @@ async def champion_matchup(
         raise HTTPException(status_code=404, detail=f"Champion id {champ_b_id} not found in DDragon data.")
 
     role_filter = role.upper() if role else None
-    if role_filter and role_filter not in _VALID_ROLES:
+    if role_filter and role_filter not in _VALID_MATCHUP_ROLES:
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid role '{role}'. Valid roles: {', '.join(sorted(_VALID_ROLES))}",
+            detail=f"Invalid role '{role}'. Valid roles: {', '.join(sorted(_VALID_MATCHUP_ROLES))}",
         )
 
     # ------------------------------------------------------------------
@@ -405,6 +425,10 @@ async def get_champion(
         )
 
     db_stats = _champion_db_stats(db, champion_id)
+    role_tiers = get_champion_role_tiers(meta["id"], meta["name"])
+    role_affinity = visible_roles_from_tiers(role_tiers)
+    if not role_affinity:
+        role_affinity = convert_ddragon_roles_to_display(meta["role_affinity"])
 
     return {
         # DDragon metadata
@@ -415,7 +439,8 @@ async def get_champion(
         "blurb":        meta["blurb"],
         "tags":         meta["tags"],
         "image_url":    meta["image_url"],
-        "role_affinity":meta["role_affinity"],
+        "role_affinity":role_affinity,
+        "role_tiers":   role_tiers,
         "base_stats":   meta["stats"],
         # Tracked performance data (null if no matches ingested for this champion)
         "tracked_stats": db_stats,

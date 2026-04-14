@@ -5,6 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import styles from "@/app/mvp.module.css";
 import {
+  CsPrediction,
+  KdaPrediction,
   MatchHistoryEntry,
   QueueCode,
   WinPrediction,
@@ -39,6 +41,8 @@ export default function MatchHistoryPage() {
   const [loading, setLoading] = useState(true);
   const [matches, setMatches] = useState<MatchHistoryEntry[]>([]);
   const [predictions, setPredictions] = useState<Record<string, WinPrediction>>({});
+  const [kdaPredictions, setKdaPredictions] = useState<Record<string, KdaPrediction>>({});
+  const [csPredictions, setCsPredictions] = useState<Record<string, CsPrediction>>({});
   const [loadingPredictions, setLoadingPredictions] = useState(false);
   const [queueFilter, setQueueFilter] = useState<QueueFilter>("all");
   const [resultFilter, setResultFilter] = useState<ResultFilter>("all");
@@ -53,19 +57,44 @@ export default function MatchHistoryPage() {
       setMatches(response);
       setLoading(false);
 
-      // Load win predictions for all matches in parallel
+      // Load all AI predictions for every match in parallel
       setLoadingPredictions(true);
       const predResults = await Promise.allSettled(
-        response.map((m) => frontendMvpClient.getWinPrediction(puuid, m.match_id))
+        response.map(async (m) => {
+          const [win, kda, cs] = await Promise.allSettled([
+            frontendMvpClient.getWinPrediction(puuid, m.match_id),
+            frontendMvpClient.getKdaPrediction(puuid, m.match_id),
+            frontendMvpClient.getCsPrediction(puuid, m.match_id),
+          ]);
+          return {
+            matchId: m.match_id,
+            win,
+            kda,
+            cs,
+          };
+        })
       );
       if (!mounted) return;
-      const predMap: Record<string, WinPrediction> = {};
-      predResults.forEach((result, idx) => {
+      const winPredMap: Record<string, WinPrediction> = {};
+      const kdaPredMap: Record<string, KdaPrediction> = {};
+      const csPredMap: Record<string, CsPrediction> = {};
+      predResults.forEach((result) => {
         if (result.status === "fulfilled") {
-          predMap[response[idx].match_id] = result.value;
+          const { matchId, win, kda, cs } = result.value;
+          if (win.status === "fulfilled") {
+            winPredMap[matchId] = win.value;
+          }
+          if (kda.status === "fulfilled") {
+            kdaPredMap[matchId] = kda.value;
+          }
+          if (cs.status === "fulfilled") {
+            csPredMap[matchId] = cs.value;
+          }
         }
       });
-      setPredictions(predMap);
+      setPredictions(winPredMap);
+      setKdaPredictions(kdaPredMap);
+      setCsPredictions(csPredMap);
       setLoadingPredictions(false);
     };
 
@@ -176,6 +205,8 @@ export default function MatchHistoryPage() {
                     <th>Vision</th>
                     <th>Wards</th>
                     <th>KDA</th>
+                    <th>Exp KDA</th>
+                    <th>Exp CS/Min</th>
                     <th>Win Prob.</th>
                     <th>Result</th>
                     <th>Duration</th>
@@ -185,9 +216,19 @@ export default function MatchHistoryPage() {
                 <tbody>
                   {filteredMatches.map((match) => {
                     const pred = predictions[match.match_id];
+                    const kdaPred = kdaPredictions[match.match_id];
+                    const csPred = csPredictions[match.match_id];
                     const winProb =
                       pred?.model_trained && pred?.win_probability !== null
                         ? `${(pred.win_probability * 100).toFixed(1)}%`
+                        : "—";
+                    const expectedKda =
+                      kdaPred?.model_trained && kdaPred?.expected_kda !== null
+                        ? fmt(kdaPred.expected_kda)
+                        : "—";
+                    const expectedCsPerMin =
+                      csPred?.model_trained && csPred?.expected_cs_per_min !== null
+                        ? fmt(csPred.expected_cs_per_min)
                         : "—";
 
                     return (
@@ -223,6 +264,8 @@ export default function MatchHistoryPage() {
                         <td>{match.vision_score}</td>
                         <td>{match.wards_placed ?? "—"}</td>
                         <td>{fmt(match.kda)}</td>
+                        <td>{expectedKda}</td>
+                        <td>{expectedCsPerMin}</td>
                         <td>
                           <span className={
                             pred?.model_trained && pred?.win_probability !== null

@@ -235,6 +235,46 @@ export interface ModelsStatus {
   [modelName: string]: ModelStatusEntry;
 }
 
+export interface ThreatWeights {
+  win_rate_weight: number;
+  kda_weight: number;
+  source: "model" | "default" | string;
+  model_auc: number | null;
+  feature_breakdown: Record<string, number> | null;
+  interpretation: string;
+}
+
+export interface WinPredictionBacktestSummary {
+  total: number;
+  correct: number;
+  accuracy: number | null;
+  mean_predicted_prob: number | null;
+  actual_win_rate: number | null;
+  brier_score: number | null;
+}
+
+export interface WinPredictionCalibrationBucket {
+  bucket: string;
+  predicted_range: [number, number];
+  n_matches: number;
+  actual_win_rate: number | null;
+}
+
+export interface WinPredictionBacktest {
+  model_trained: boolean;
+  reason?: string;
+  summary?: WinPredictionBacktestSummary;
+  calibration_buckets?: WinPredictionCalibrationBucket[];
+  match_results?: Array<{
+    match_id: string;
+    puuid: string;
+    predicted_prob: number;
+    actual_win: number;
+    correct: boolean;
+    confidence: string;
+  }>;
+}
+
 export interface TeamStats {
   team_id: 100 | 200;
   towers: number;
@@ -396,6 +436,8 @@ export interface FrontendMvpClient {
   getMatchDraft(matchId: string): Promise<DraftData>;
   getEarlyGamePrediction(matchId: string): Promise<EarlyGamePrediction>;
   getModelsStatus(): Promise<ModelsStatus>;
+  getThreatWeights(): Promise<ThreatWeights>;
+  getWinPredictionBacktest(nMatches?: number): Promise<WinPredictionBacktest>;
 
   // Page 5
   getPlayerBanAnalytics(puuid: string, limit: number): Promise<PlayerBanAnalytics>;
@@ -727,6 +769,18 @@ const frontendMvpClient: FrontendMvpClient = {
     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/models/status`);
     if (!res.ok) throw new Error("Failed to fetch models status");
     return res.json() as Promise<ModelsStatus>;
+  },
+
+  async getThreatWeights() {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/threat-weights`);
+    if (!res.ok) throw new Error("Failed to fetch threat weights");
+    return res.json() as Promise<ThreatWeights>;
+  },
+
+  async getWinPredictionBacktest(nMatches = 50) {
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/backtest/win-prediction?n_matches=${nMatches}`);
+    if (!res.ok) throw new Error("Failed to fetch win-prediction backtest");
+    return res.json() as Promise<WinPredictionBacktest>;
   },
 
   async getPlayerBanAnalytics(puuid, limit) {

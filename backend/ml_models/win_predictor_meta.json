@@ -1,9 +1,9 @@
 {
-  "model_type": "xgboost",
-  "trained_at": "2026-04-09T15:29:23.484607+00:00",
-  "n_samples": 2617,
-  "n_train": 2093,
-  "n_test": 524,
+  "model_type": "logistic",
+  "trained_at": "2026-04-14T14:36:47.869386+00:00",
+  "n_samples": 11660,
+  "n_train": 9328,
+  "n_test": 2332,
   "sklearn_version": "1.8.0",
   "xgboost_version": "3.2.0",
   "feature_cols": [
@@ -34,58 +34,58 @@
     "blue_side"
   ],
   "train_medians": {
-    "win_rate_20": 0.5714285714285714,
-    "avg_kda_20": 3.8741176470588234,
-    "avg_cs_per_min_20": 7.446842105263158,
-    "avg_gold_per_min_20": 449.1835714285714,
-    "avg_kill_part_20": 0.51305,
+    "win_rate_20": 0.5263157894736842,
+    "avg_kda_20": 3.6957500000000003,
+    "avg_cs_per_min_20": 7.331519230769231,
+    "avg_gold_per_min_20": 437.03441666666663,
+    "avg_kill_part_20": 0.49636794871794876,
     "win_streak": 1.0,
-    "death_rate_20": 5.0,
-    "vision_per_min_20": 1.1016666666666666,
-    "kda_std_10": 3.165087500984592,
-    "cs_trend_10": 0.0044848484848484865,
-    "team_avg_win_rate_20": 0.5714285714285714,
-    "team_avg_kda_20": 3.8741176470588234,
-    "team_avg_cs_min_20": 7.446842105263158,
-    "team_gold_diff_prior": -309.0733333333333,
+    "death_rate_20": 4.95,
+    "vision_per_min_20": 1.1363068181818181,
+    "kda_std_10": 3.129250442554133,
+    "cs_trend_10": 0.005939393939393977,
+    "team_avg_win_rate_20": 0.5210084033613446,
+    "team_avg_kda_20": 3.8582666666666667,
+    "team_avg_cs_min_20": 6.6463636363636365,
+    "team_gold_diff_prior": 1.1443552350426955,
     "patch_version_float": 16.06,
     "role_encoded": 2.0,
-    "avg_role_norm_kda_20": -0.07953870718210349,
-    "opp_avg_win_rate_20": 0.5,
-    "opp_avg_kda_20": 2.5,
-    "opp_avg_cs_min_20": 7.0,
+    "avg_role_norm_kda_20": 0.01730249699950657,
+    "opp_avg_win_rate_20": 0.5145768833849329,
+    "opp_avg_kda_20": 3.8442205882352942,
+    "opp_avg_cs_min_20": 6.614763888888889,
     "win_rate_diff": 0.0,
-    "kda_diff": 0.0,
-    "cs_diff": 0.0,
-    "gold_diff_norm": -3.090733333333333,
+    "kda_diff": -0.0007863678804858054,
+    "cs_diff": -0.017807843137254586,
+    "gold_diff_norm": 0.011443552350426954,
     "blue_side": 0.0
   },
   "metrics": {
-    "accuracy": 0.5363,
-    "roc_auc": 0.5022,
-    "lr_auc": 0.4765,
-    "xgb_auc": 0.5022
+    "accuracy": 0.4798,
+    "roc_auc": 0.4766,
+    "lr_auc": 0.4766,
+    "xgb_auc": 0.4584
   },
   "top_factors": [
     {
-      "feature": "avg_gold_per_min_20",
-      "importance": 0.0786
+      "feature": "kda_diff",
+      "importance": 0.1654
     },
     {
-      "feature": "avg_kill_part_20",
-      "importance": 0.0786
+      "feature": "team_avg_kda_20",
+      "importance": 0.1637
     },
     {
-      "feature": "vision_per_min_20",
-      "importance": 0.0774
+      "feature": "opp_avg_kda_20",
+      "importance": 0.1181
     },
     {
       "feature": "patch_version_float",
-      "importance": 0.0773
+      "importance": 0.0892
     },
     {
-      "feature": "win_rate_20",
-      "importance": 0.0752
+      "feature": "avg_gold_per_min_20",
+      "importance": 0.0874
     }
   ]
 }

@@ -4,7 +4,16 @@ import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import styles from "@/app/mvp.module.css";
-import { DraftData, EarlyGamePrediction, MatchDetail, MockApiError, TimelineFrameRaw, frontendMvpClient } from "@/lib/frontendMvpClient";
+import {
+  DraftData,
+  EarlyGamePrediction,
+  MatchDetail,
+  MockApiError,
+  ThreatWeights,
+  TimelineFrameRaw,
+  WinPredictionBacktest,
+  frontendMvpClient,
+} from "@/lib/frontendMvpClient";
 
 function formatDuration(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
@@ -223,18 +232,22 @@ export default function MatchDetailPage() {
   const [timelineAvailable, setTimelineAvailable] = useState(false);
   const [goldDiffPoints, setGoldDiffPoints] = useState<GoldDiffPoint[] | null>(null);
   const [earlyGame, setEarlyGame] = useState<EarlyGamePrediction | null>(null);
+  const [threatWeights, setThreatWeights] = useState<ThreatWeights | null>(null);
+  const [winBacktest, setWinBacktest] = useState<WinPredictionBacktest | null>(null);
 
 
   useEffect(() => {
     let mounted = true;
 
     const loadData = async () => {
-      const [detailResponse, draftResponse, earlyGameResponse, champsRes, runeMapRes] = await Promise.all([
+      const [detailResponse, draftResponse, earlyGameResponse, champsRes, runeMapRes, threatRes, backtestRes] = await Promise.all([
         frontendMvpClient.getMatch(matchId),
         frontendMvpClient.getMatchDraft(matchId).catch(() => null),
         frontendMvpClient.getEarlyGamePrediction(matchId).catch(() => null),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/champions`).then((r) => r.ok ? r.json() : { champions: [] }).catch(() => ({ champions: [] })),
         fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/runes/map`).then((r) => r.ok ? r.json() : {}).catch(() => ({})),
+        frontendMvpClient.getThreatWeights().catch(() => null),
+        frontendMvpClient.getWinPredictionBacktest(80).catch(() => null),
       ]);
 
       const map: Record<number, { name: string; image_url: string }> = {};
@@ -299,6 +312,8 @@ export default function MatchDetailPage() {
       setTimelineAvailable(hasTimeline);
       setGoldDiffPoints(goldPts);
       setEarlyGame(earlyGameResponse);
+      setThreatWeights(threatRes);
+      setWinBacktest(backtestRes);
     };
 
     void loadData();
@@ -419,6 +434,68 @@ export default function MatchDetailPage() {
                 <span className={styles.badge}>Confidence: {earlyGame.confidence}</span>
               </div>
             )}
+          </section>
+        )}
+
+        {/* ── AI Explainability ── */}
+        {(threatWeights || winBacktest) && (
+          <section className={styles.section}>
+            <div className={styles.sectionHeader}>
+              <div>
+                <h2 className={styles.sectionTitle}>AI Explainability</h2>
+                <p className={styles.sectionCopy}>
+                  Live model behavior signals for rubric evidence: threat weighting and calibration backtest
+                </p>
+              </div>
+            </div>
+
+            <div className={styles.twoCol}>
+              <article className={styles.dataCard}>
+                <h3 style={{ marginBottom: 8 }}>Threat Weights</h3>
+                {!threatWeights ? (
+                  <p className={styles.small}>Unavailable.</p>
+                ) : (
+                  <>
+                    <div className={styles.inlineList} style={{ marginBottom: 10 }}>
+                      <span className={threatWeights.source === "model" ? styles.badgeWin : styles.badgeLoss}>
+                        Source: {threatWeights.source}
+                      </span>
+                      <span className={styles.badge}>Win Rate Weight: {threatWeights.win_rate_weight.toFixed(2)}</span>
+                      <span className={styles.badge}>KDA Weight: {threatWeights.kda_weight.toFixed(2)}</span>
+                      <span className={styles.badge}>AUC: {threatWeights.model_auc !== null ? threatWeights.model_auc.toFixed(3) : "—"}</span>
+                    </div>
+                    <p className={styles.small} style={{ lineHeight: 1.6 }}>{threatWeights.interpretation}</p>
+                  </>
+                )}
+              </article>
+
+              <article className={styles.dataCard}>
+                <h3 style={{ marginBottom: 8 }}>Win-Prediction Backtest</h3>
+                {!winBacktest ? (
+                  <p className={styles.small}>Unavailable.</p>
+                ) : !winBacktest.model_trained ? (
+                  <p className={styles.small}>Model not trained yet{winBacktest.reason ? `: ${winBacktest.reason}` : "."}</p>
+                ) : (
+                  <>
+                    <div className={styles.inlineList} style={{ marginBottom: 10 }}>
+                      <span className={styles.badge}>Samples: {winBacktest.summary?.total ?? 0}</span>
+                      <span className={styles.badge}>Accuracy: {winBacktest.summary?.accuracy !== null && winBacktest.summary?.accuracy !== undefined ? `${(winBacktest.summary.accuracy * 100).toFixed(1)}%` : "—"}</span>
+                      <span className={styles.badge}>Brier: {winBacktest.summary?.brier_score !== null && winBacktest.summary?.brier_score !== undefined ? winBacktest.summary.brier_score.toFixed(4) : "—"}</span>
+                    </div>
+                    <p className={styles.small} style={{ marginBottom: 8 }}>
+                      Calibration buckets (predicted range vs actual win rate):
+                    </p>
+                    <div className={styles.inlineList}>
+                      {(winBacktest.calibration_buckets ?? []).slice(0, 6).map((bucket) => (
+                        <span key={bucket.bucket} className={styles.badgeNeutral}>
+                          {bucket.bucket}: {bucket.actual_win_rate !== null ? `${(bucket.actual_win_rate * 100).toFixed(0)}%` : "—"} ({bucket.n_matches})
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </article>
+            </div>
           </section>
         )}
 

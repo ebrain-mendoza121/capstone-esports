@@ -17,6 +17,12 @@ interface ChampionEntry {
   tags: string[];
   image_url: string;
   role_affinity: string[];
+  role_tiers?: RoleTier[];
+}
+
+interface RoleTier {
+  role: string;
+  tier: "S" | "A" | "B";
 }
 
 interface TrackedStats {
@@ -82,34 +88,60 @@ interface FavorEntry {
 // Filter constants
 // ---------------------------------------------------------------------------
 
-const ROLE_OPTS = ["ALL", "TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"] as const;
+const ROLE_OPTS = ["ALL", "TOP", "JUNGLE", "MID", "BOTTOM", "SUPPORT"] as const;
 const TAG_OPTS  = ["ALL", "Fighter", "Mage", "Marksman", "Support", "Tank", "Assassin", "Specialist"] as const;
-const ROLES_SELECTABLE = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"] as const;
+const ROLES_SELECTABLE = ["TOP", "JUNGLE", "MID", "BOTTOM", "SUPPORT"] as const;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function pct(v: number | null) {
-  return v !== null && v !== undefined ? `${(v * 100).toFixed(1)}%` : "—";
+function toFiniteNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? num : null;
 }
-function fmt(v: number | null, d = 2) {
-  return v !== null && v !== undefined ? v.toFixed(d) : "—";
+
+function pct(v: unknown) {
+  const num = toFiniteNumber(v);
+  return num !== null ? `${(num * 100).toFixed(1)}%` : "—";
 }
-function sign(v: number | null) {
-  if (v === null || v === undefined) return "—";
-  return v >= 0 ? `+${v.toFixed(2)}` : v.toFixed(2);
+function fmt(v: unknown, d = 2) {
+  const num = toFiniteNumber(v);
+  return num !== null ? num.toFixed(d) : "—";
+}
+function sign(v: unknown) {
+  const num = toFiniteNumber(v);
+  if (num === null) return "—";
+  return num >= 0 ? `+${num.toFixed(2)}` : num.toFixed(2);
 }
 
 const ROLE_COLOR: Record<string, string> = {
   TOP:     "#f59e0b",
   JUNGLE:  "#22c55e",
+  MID:     "#818cf8",
   MIDDLE:  "#818cf8",
   BOTTOM:  "#38bdf8",
+  SUPPORT: "#f472b6",
   UTILITY: "#f472b6",
 };
 
-function RoleBadge({ role }: { role: string }) {
+const TIER_COLOR: Record<string, string> = {
+  S: "#16a34a",
+  A: "#f59e0b",
+  B: "#dc2626",
+};
+
+const ROLE_TO_MATCHUP_API: Record<string, string> = {
+  TOP: "TOP",
+  JUNGLE: "JUNGLE",
+  MID: "MIDDLE",
+  BOTTOM: "BOTTOM",
+  SUPPORT: "UTILITY",
+};
+
+function RoleBadge({ role, tier }: { role: string; tier?: string }) {
+  const bg = tier ? (TIER_COLOR[tier] ?? "#6b7280") : (ROLE_COLOR[role] ?? "#6b7280");
   return (
     <span style={{
       display: "inline-block",
@@ -118,12 +150,22 @@ function RoleBadge({ role }: { role: string }) {
       fontSize: 11,
       fontWeight: 700,
       marginRight: 3,
-      background: ROLE_COLOR[role] ?? "#6b7280",
+      background: bg,
       color: "#fff",
     }}>
-      {role}
+      {tier ? `${role} (${tier})` : role}
     </span>
   );
+}
+
+function getRoleDisplayEntries(champ: ChampionEntry): Array<{ role: string; tier?: string }> {
+  if (champ.role_tiers && champ.role_tiers.length > 0) {
+    const allowed = new Set(champ.role_affinity);
+    return champ.role_tiers
+      .filter((entry) => allowed.has(entry.role))
+      .map((entry) => ({ role: entry.role, tier: entry.tier }));
+  }
+  return champ.role_affinity.map((role) => ({ role }));
 }
 
 function TagBadge({ tag }: { tag: string }) {
@@ -226,7 +268,9 @@ function ChampionCard({
       </strong>
 
       <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "center", gap: 2 }}>
-        {champ.role_affinity.map((r) => <RoleBadge key={r} role={r} />)}
+        {getRoleDisplayEntries(champ).map((entry) => (
+          <RoleBadge key={`${entry.role}-${entry.tier ?? "base"}`} role={entry.role} tier={entry.tier} />
+        ))}
       </div>
     </button>
   );
@@ -284,7 +328,9 @@ function DetailPanel({
             {detail.title}
           </p>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
-            {detail.role_affinity.map((r) => <RoleBadge key={r} role={r} />)}
+            {getRoleDisplayEntries(detail).map((entry) => (
+              <RoleBadge key={`${entry.role}-${entry.tier ?? "base"}`} role={entry.role} tier={entry.tier} />
+            ))}
             {detail.tags.map((t) => <TagBadge key={t} tag={t} />)}
           </div>
         </div>
@@ -686,7 +732,8 @@ export default function ChampionsPage() {
       setMatchupStep("results");
       setLoadingMatchup(true);
 
-      const roleParam = matchupRole ? `?role=${matchupRole}` : "";
+      const mappedRole = matchupRole ? ROLE_TO_MATCHUP_API[matchupRole] : "";
+      const roleParam = mappedRole ? `?role=${mappedRole}` : "";
       const extraAmp  = matchupRole ? "&" : "?";
 
       try {
@@ -813,7 +860,9 @@ export default function ChampionsPage() {
                 value={muRoleFilter}
                 onChange={(e) => setMuRoleFilter(e.target.value)}
               >
-                {ROLE_OPTS.map((r) => <option key={r} value={r}>{r === "ALL" ? "All Roles" : r}</option>)}
+                {ROLE_OPTS.map((r) => (
+                  <option key={r} value={r}>{r === "ALL" ? "All Roles" : r}</option>
+                ))}
               </select>
             </div>
           </div>

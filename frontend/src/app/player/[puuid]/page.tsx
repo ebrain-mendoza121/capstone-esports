@@ -12,6 +12,7 @@ import {
   PlayerRolePerformance,
   PlaystyleResult,
   RuneEntry,
+  ModelsStatus,
   frontendMvpClient,
 } from "@/lib/frontendMvpClient";
 
@@ -43,6 +44,7 @@ export default function PlayerDashboardPage() {
   const [rolePerf, setRolePerf] = useState<PlayerRolePerformance | null>(null);
   const [playstyle, setPlaystyle] = useState<PlaystyleResult | null | "loading">("loading");
   const [champRecs, setChampRecs] = useState<ChampionRecommendation[]>([]);
+  const [modelsStatus, setModelsStatus] = useState<ModelsStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ingesting, setIngesting] = useState(false);
   const [objControl, setObjControl] = useState<ObjectiveControl | null>(null);
@@ -52,7 +54,7 @@ export default function PlayerDashboardPage() {
 
     const loadData = async () => {
       try {
-        const [playerData, metricData, runeData, roleData, playstyleData, champData, objData] =
+        const [playerData, metricData, runeData, roleData, playstyleData, champData, objData, modelsData] =
           await Promise.all([
             frontendMvpClient.getPlayer(puuid),
             frontendMvpClient.getPlayerMetrics(puuid),
@@ -61,6 +63,7 @@ export default function PlayerDashboardPage() {
             frontendMvpClient.getPlayerPlaystyle(puuid),
             frontendMvpClient.getChampionRecommendations(puuid, 8),
             frontendMvpClient.getObjectiveControl(puuid).catch(() => null),
+            frontendMvpClient.getModelsStatus().catch(() => null),
           ]);
 
         if (!mounted) return;
@@ -72,6 +75,7 @@ export default function PlayerDashboardPage() {
         setPlaystyle(playstyleData);
         setChampRecs(champData);
         setObjControl(objData);
+        setModelsStatus(modelsData);
         setIngesting(false);
       } catch {
         if (!mounted) return;
@@ -129,6 +133,13 @@ export default function PlayerDashboardPage() {
     return new Date(player.created_at).toLocaleDateString();
   }, [player]);
 
+  const modelsTrained = useMemo(() => {
+    if (!modelsStatus) return null;
+    const entries = Object.values(modelsStatus);
+    if (entries.length === 0) return null;
+    return entries.every((m) => m.trained);
+  }, [modelsStatus]);
+
   if (error) {
     return (
       <main className={styles.page}>
@@ -150,6 +161,11 @@ export default function PlayerDashboardPage() {
               {player ? `${player.riot_id}#${player.tag_line}` : "Loading…"}
             </h1>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {modelsTrained !== null && (
+                <span className={modelsTrained ? styles.badgeWin : styles.badgeLoss}>
+                  AI Models: {modelsTrained ? "Trained" : "Not Fully Trained"}
+                </span>
+              )}
               <Link className={styles.linkChip} href={`/player/${puuid}/trends`}>
                 📈 Performance Trends
               </Link>
