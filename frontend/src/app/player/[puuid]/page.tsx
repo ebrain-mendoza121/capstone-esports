@@ -83,7 +83,7 @@ export default function PlayerDashboardPage() {
         if (ingestGameName && ingestTagLine) {
           setIngesting(true);
           // Kick off ingest (may already be running from match page background fetch)
-          void fetch(`${process.env.NEXT_PUBLIC_API_URL}/ingest/player`, {
+          void fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://capstone-esports-production.up.railway.app"}/ingest/player`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
