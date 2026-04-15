@@ -459,6 +459,172 @@ def get_rolling_features(
     }
 
 
+def get_rolling_features_batch(
+    db: Session,
+    pairs: list[tuple[str, int]],
+    window: int = 20,
+) -> dict[tuple[str, int], dict]:
+    """Batch version of get_rolling_features for multiple (puuid, before_ts) pairs.
+
+    Replaces N individual calls with 2 queries total using unnest-based CTEs.
+    Returns a dict keyed by (puuid, before_ts); pairs with < 5 prior games
+    map to an empty dict (same contract as the single-player version).
+    """
+    if not pairs:
+        return {}
+
+    # Deduplicate pairs to avoid redundant work
+    pairs = list(dict.fromkeys(pairs))
+
+    puuids     = [p[0] for p in pairs]
+    timestamps = [p[1] for p in pairs]
+
+    params = {"puuids": puuids, "timestamps": timestamps, "window": window}
+
+    # ------------------------------------------------------------------
+    # Query 1 — Rolling aggregates for all (puuid, before_ts) at once
+    # ------------------------------------------------------------------
+    agg_sql = text("""
+        WITH inputs AS (
+            SELECT * FROM unnest(:puuids::text[], :timestamps::bigint[])
+                       AS t(puuid, before_ts)
+        ),
+        base AS (
+            SELECT
+                inp.puuid,
+                inp.before_ts,
+                ps.win,
+                ps.deaths,
+                dm.kda,
+                dm.cs_per_min,
+                dm.gold_per_min,
+                dm.kill_participation,
+                dm.vision_per_min,
+                ROW_NUMBER() OVER (
+                    PARTITION BY inp.puuid, inp.before_ts
+                    ORDER BY m.game_creation DESC
+                ) AS rn
+            FROM inputs inp
+            JOIN players p            ON p.puuid = inp.puuid
+            JOIN participant_stats ps ON ps.player_id = p.id
+            JOIN matches m            ON m.match_id = ps.match_id
+            JOIN derived_metrics dm   ON dm.match_id = ps.match_id
+                                     AND dm.puuid = p.puuid
+            WHERE m.game_creation < inp.before_ts
+              AND m.queue_id = 420
+        )
+        SELECT
+            puuid,
+            before_ts,
+            AVG((win)::int)         AS win_rate_20,
+            AVG(kda)                AS avg_kda_20,
+            AVG(cs_per_min)         AS avg_cs_per_min_20,
+            AVG(gold_per_min)       AS avg_gold_per_min_20,
+            AVG(kill_participation) AS avg_kill_part_20,
+            AVG(deaths)             AS death_rate_20,
+            AVG(vision_per_min)     AS vision_per_min_20,
+            COUNT(*)                AS games_in_window
+        FROM base
+        WHERE rn <= :window
+        GROUP BY puuid, before_ts
+    """)
+
+    agg_rows = db.execute(agg_sql, params).mappings().all()
+
+    # ------------------------------------------------------------------
+    # Query 2 — Streak + KDA std + CS trend rows for all pairs at once
+    # ------------------------------------------------------------------
+    streak_sql = text("""
+        WITH inputs AS (
+            SELECT * FROM unnest(:puuids::text[], :timestamps::bigint[])
+                       AS t(puuid, before_ts)
+        ),
+        ranked AS (
+            SELECT
+                inp.puuid,
+                inp.before_ts,
+                ps.win,
+                dm.kda,
+                dm.cs_per_min,
+                m.game_creation,
+                ROW_NUMBER() OVER (
+                    PARTITION BY inp.puuid, inp.before_ts
+                    ORDER BY m.game_creation DESC
+                ) AS rn
+            FROM inputs inp
+            JOIN players p            ON p.puuid = inp.puuid
+            JOIN participant_stats ps ON ps.player_id = p.id
+            JOIN matches m            ON m.match_id = ps.match_id
+            JOIN derived_metrics dm   ON dm.match_id = ps.match_id
+                                     AND dm.puuid = p.puuid
+            WHERE m.game_creation < inp.before_ts
+              AND m.queue_id = 420
+        )
+        SELECT puuid, before_ts, win, kda, cs_per_min, game_creation
+        FROM ranked
+        WHERE rn <= :window
+        ORDER BY puuid, before_ts, game_creation DESC
+    """)
+
+    streak_rows = db.execute(streak_sql, params).fetchall()
+
+    # Group streak rows by (puuid, before_ts)
+    from collections import defaultdict
+    streak_by_pair: dict[tuple, list] = defaultdict(list)
+    for row in streak_rows:
+        streak_by_pair[(row[0], row[1])].append(row)
+
+    # ------------------------------------------------------------------
+    # Assemble results
+    # ------------------------------------------------------------------
+    results: dict[tuple[str, int], dict] = {}
+
+    for agg_row in agg_rows:
+        puuid     = agg_row["puuid"]
+        before_ts = agg_row["before_ts"]
+        games_count = int(agg_row["games_in_window"]) if agg_row["games_in_window"] else 0
+
+        if games_count < 5:
+            results[(puuid, before_ts)] = {}
+            continue
+
+        pair_streaks = streak_by_pair.get((puuid, before_ts), [])
+        win_results  = [bool(r[2]) for r in pair_streaks]
+        streak       = _compute_streak(win_results)
+
+        recent_10    = pair_streaks[:10]
+        kda_vals     = [float(r[3]) for r in recent_10 if r[3] is not None]
+        cs_vals      = [float(r[4]) for r in recent_10 if r[4] is not None]
+        kda_vals_asc = list(reversed(kda_vals))
+        cs_vals_asc  = list(reversed(cs_vals))
+
+        kda_std_10  = float(np.std(kda_vals)) if len(kda_vals) >= 2 else 0.0
+        cs_trend_10 = _linear_trend(cs_vals_asc)
+
+        results[(puuid, before_ts)] = {
+            "puuid":               puuid,
+            "win_rate_20":         float(agg_row["win_rate_20"] or 0.0),
+            "avg_kda_20":          float(agg_row["avg_kda_20"] or 0.0),
+            "avg_cs_per_min_20":   float(agg_row["avg_cs_per_min_20"] or 0.0),
+            "avg_gold_per_min_20": float(agg_row["avg_gold_per_min_20"] or 0.0),
+            "avg_kill_part_20":    float(agg_row["avg_kill_part_20"] or 0.0),
+            "death_rate_20":       float(agg_row["death_rate_20"] or 0.0),
+            "vision_per_min_20":   float(agg_row["vision_per_min_20"] or 0.0),
+            "kda_std_10":          round(kda_std_10, 4),
+            "cs_trend_10":         round(cs_trend_10, 6),
+            "win_streak":          streak,
+            "games_in_window":     games_count,
+            "has_full_window":     games_count >= window,
+        }
+
+    # Fill empty dict for any pair that had no rows (< 5 games or not found)
+    for pair in pairs:
+        if pair not in results:
+            results[pair] = {}
+
+    return results
+
+
 def get_champion_stats(db: Session, puuid: str) -> pd.DataFrame:
     """Return per-champion aggregates for one player (champion recommendation).
 

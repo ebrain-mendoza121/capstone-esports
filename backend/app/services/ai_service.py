@@ -42,6 +42,7 @@ from app.services.feature_extractor import (
     get_champion_stats,
     get_clustering_features,
     get_rolling_features,
+    get_rolling_features_batch,
     get_timeline_features,
     get_win_prediction_features,
 )
@@ -1764,42 +1765,67 @@ def run_win_prediction_backtest(db: Session, n_matches: int = 50) -> dict:
     }
 
     # ------------------------------------------------------------------
-    # Run predict_win for each (match_id, puuid) pair
+    # Run predictions in batch — replaces ~1000 per-player DB queries
+    # with 2 queries total via get_rolling_features_batch()
     # ------------------------------------------------------------------
+
+    # Build lookup: match_id → game_creation (already fetched above)
+    match_creation_map = {mr["match_id"]: mr["game_creation"] for mr in match_rows}
+
+    # Collect all unique (puuid, before_ts) pairs we need features for
+    pairs: list[tuple[str, int]] = [
+        (puuid, match_creation_map[mid])
+        for (mid, puuid) in actuals
+        if mid in match_creation_map
+    ]
+
+    # Load model artifact once (avoid re-loading inside the loop)
+    artifact      = _load_model("win_predictor")
+    model         = artifact["model"]
+    scaler        = artifact["scaler"]
+    feat_cols     = artifact["feature_cols"]
+    model_type    = artifact["model_type"]
+    train_medians = artifact.get("train_medians", {})
+
+    # Fetch all rolling features in 2 queries instead of ~1000
+    rolling_cache = get_rolling_features_batch(db, pairs)
+
     match_results: list[dict] = []
 
     for mr in match_rows:
-        mid = mr["match_id"]
-        # All puuids active in this match (intersection with our actuals lookup)
-        participants = [
-            puuid for (m, puuid) in actuals if m == mid
-        ]
+        mid       = mr["match_id"]
+        before_ts = mr["game_creation"]
+        participants = [puuid for (m, puuid) in actuals if m == mid]
+
         for puuid in participants:
             actual_win = actuals.get((mid, puuid), -1)
             if actual_win == -1:
                 continue  # no outcome data — skip
 
-            result = predict_win(db, puuid, mid)
+            rolling = rolling_cache.get((puuid, before_ts), {})
+            games   = rolling.get("games_in_window", 0)
+            if games < 5:
+                continue  # low confidence — skip (mirrors predict_win behaviour)
 
-            # Skip if model not trained or low confidence
-            if not result.get("model_trained", False):
-                continue
-            if result.get("confidence") == "low":
-                continue
-            predicted_prob = result.get("win_probability")
-            if predicted_prob is None:
-                continue
+            confidence = "high" if games >= 10 else "medium"
 
-            predicted_win = 1 if predicted_prob >= 0.5 else 0
-            correct = predicted_win == actual_win
+            # Build feature row, imputing missing columns with training medians
+            row   = {col: rolling.get(col, train_medians.get(col, 0.0)) for col in feat_cols}
+            X_new = pd.DataFrame([row])[feat_cols].values
+            if scaler is not None:
+                X_new = scaler.transform(X_new)
+
+            predicted_prob = float(model.predict_proba(X_new)[0][1])
+            predicted_win  = 1 if predicted_prob >= 0.5 else 0
+            correct        = predicted_win == actual_win
 
             match_results.append({
                 "match_id":       mid,
                 "puuid":          puuid,
-                "predicted_prob": round(float(predicted_prob), 4),
+                "predicted_prob": round(predicted_prob, 4),
                 "actual_win":     actual_win,
                 "correct":        correct,
-                "confidence":     result.get("confidence"),
+                "confidence":     confidence,
             })
 
     if not match_results:
