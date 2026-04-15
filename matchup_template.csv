@@ -1,0 +1,7 @@
+champion_a,champion_b,role,win_rate_a_vs_b,games_played,patch,source,notes
+Darius,Garen,TOP,0.531,1243,15.8,lolalytics,EXAMPLE ROW — delete before uploading
+Darius,Fiora,TOP,0.442,2891,15.8,lolalytics,EXAMPLE ROW — Fiora outscales hard post-6
+Zed,Syndra,MIDDLE,0.558,673,15.8,opgg,EXAMPLE ROW
+Jinx,Caitlyn,BOTTOM,0.479,4102,15.8,lolalytics,EXAMPLE ROW
+Thresh,Nautilus,UTILITY,0.501,892,15.8,ugg,EXAMPLE ROW — very close matchup
+Vi,Lee Sin,JUNGLE,0.512,1560,15.8,lolalytics,EXAMPLE ROW
