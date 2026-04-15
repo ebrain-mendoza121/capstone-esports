@@ -16,7 +16,7 @@ export default function HomePage() {
         <section className={styles.sectionCard}>
           <h2 className={styles.sectionTitle}>Choose Your Analysis Flow</h2>
           <p className={styles.sectionText}>
-            Start with one of the three entry points below. Each route includes submission handling and a dedicated
+            Start with one of the four entry points below. Each route includes submission handling and a dedicated
             placeholder panel for future AI responses.
           </p>
 
