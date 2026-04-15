@@ -40,8 +40,22 @@ settings = get_settings()
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # noqa: ARG001
-    """Lifespan handler — DDragon caches load lazily on first request to save memory."""
-    logger.info("App startup complete — DDragon caches will load on first request.")
+    """Pre-warm Data Dragon caches on startup so first requests pay no I/O cost."""
+    try:
+        # Load full champion map (metadata + image URLs + role affinity) so that
+        # /champions endpoints and team builder serve requests instantly.
+        # get_champion_full_map() also populates the simple _champion_map cache,
+        # so callers of get_champion_map() benefit too.
+        from app.services.ddragon import get_champion_full_map, get_rune_map
+        champ_map = await get_champion_full_map()
+        rune_map  = await get_rune_map()
+        logger.info(
+            "DDragon caches ready: %d champions (full metadata), %d rune entries",
+            len(champ_map),
+            len(rune_map),
+        )
+    except Exception as exc:                        # pragma: no cover
+        logger.warning("DDragon preload failed at startup: %s", exc)
     yield  # application runs
     # (shutdown cleanup goes here if ever needed)
 
@@ -101,17 +115,6 @@ app.include_router(api_router)
 # so monitoring tools and load tests can distinguish "DB busy" from real bugs.
 # ---------------------------------------------------------------------------
 
-def _cors_headers(request: Request) -> dict:
-    """Return CORS headers for the request's origin if it is whitelisted."""
-    origin = request.headers.get("origin", "")
-    if origin in settings.cors_origins:
-        return {
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true",
-        }
-    return {}
-
-
 @app.exception_handler(SATimeoutError)
 async def _db_timeout_handler(request: Request, exc: SATimeoutError) -> JSONResponse:
     """Connection pool exhausted — return 503 with Retry-After hint."""
@@ -122,7 +125,7 @@ async def _db_timeout_handler(request: Request, exc: SATimeoutError) -> JSONResp
     )
     return JSONResponse(
         status_code=503,
-        headers={"Retry-After": "2", **_cors_headers(request)},
+        headers={"Retry-After": "2"},
         content={
             "error":   "DatabasePoolTimeout",
             "message": "Database connection pool exhausted. Please retry in a moment.",
@@ -142,7 +145,7 @@ async def _db_operational_handler(request: Request, exc: SAOperationalError) -> 
     )
     return JSONResponse(
         status_code=503,
-        headers={"Retry-After": "1", **_cors_headers(request)},
+        headers={"Retry-After": "1"},
         content={
             "error":   "DatabaseOperationalError",
             "message": "Transient database error. Please retry.",
@@ -173,7 +176,6 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
     )
     return JSONResponse(
         status_code=500,
-        headers=_cors_headers(request),
         content={
             "error":   type(exc).__name__,
             "message": str(exc) or "An unexpected server error occurred.",

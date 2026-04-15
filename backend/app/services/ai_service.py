@@ -8,84 +8,29 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+import joblib
+import numpy as np
+import pandas as pd
+import sklearn
+import xgboost as _xgb_module
+from sklearn.cluster import KMeans
+from sklearn.linear_model import LogisticRegression, Ridge
+from sklearn.metrics import (
+    accuracy_score,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
+    roc_auc_score,
+    silhouette_score,
+)
+from sklearn.preprocessing import StandardScaler
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from xgboost import XGBClassifier, XGBRegressor
 
-# ---------------------------------------------------------------------------
-# Heavy ML dependencies are loaded lazily on first use to avoid importing
-# ~400 MB of numpy/pandas/sklearn/xgboost at app startup.
-# Call _load_ml() at the top of any function that uses these libraries.
-# ---------------------------------------------------------------------------
-_ML_LOADED: bool = False
-
-# Module-level placeholders — populated by _load_ml() on first call.
-np = None  # type: ignore[assignment]
-pd = None  # type: ignore[assignment]
-joblib = None  # type: ignore[assignment]
-KMeans = None  # type: ignore[assignment]
-LogisticRegression = None  # type: ignore[assignment]
-Ridge = None  # type: ignore[assignment]
-StandardScaler = None  # type: ignore[assignment]
-accuracy_score = None  # type: ignore[assignment]
-mean_absolute_error = None  # type: ignore[assignment]
-mean_squared_error = None  # type: ignore[assignment]
-r2_score = None  # type: ignore[assignment]
-roc_auc_score = None  # type: ignore[assignment]
-silhouette_score = None  # type: ignore[assignment]
-XGBClassifier = None  # type: ignore[assignment]
-XGBRegressor = None  # type: ignore[assignment]
-_SKLEARN_VERSION: str = "unknown"
-_XGBOOST_VERSION: str = "unknown"
-
-
-def _load_ml() -> None:
-    """Import heavy ML libraries once and bind them as module globals."""
-    global _ML_LOADED, np, pd, joblib
-    global KMeans, LogisticRegression, Ridge, StandardScaler
-    global accuracy_score, mean_absolute_error, mean_squared_error
-    global r2_score, roc_auc_score, silhouette_score
-    global XGBClassifier, XGBRegressor
-    global _SKLEARN_VERSION, _XGBOOST_VERSION
-
-    if _ML_LOADED:
-        return
-
-    import numpy as _np
-    import pandas as _pd
-    import joblib as _jb
-    import sklearn as _sk
-    import xgboost as _xgb_mod
-    from sklearn.cluster import KMeans as _KM
-    from sklearn.linear_model import LogisticRegression as _LR, Ridge as _Ri
-    from sklearn.metrics import (
-        accuracy_score as _acc,
-        mean_absolute_error as _mae,
-        mean_squared_error as _mse,
-        r2_score as _r2,
-        roc_auc_score as _roc,
-        silhouette_score as _sil,
-    )
-    from sklearn.preprocessing import StandardScaler as _SS
-    from xgboost import XGBClassifier as _XGBc, XGBRegressor as _XGBr
-
-    np = _np
-    pd = _pd
-    joblib = _jb
-    KMeans = _KM
-    LogisticRegression = _LR
-    Ridge = _Ri
-    StandardScaler = _SS
-    accuracy_score = _acc
-    mean_absolute_error = _mae
-    mean_squared_error = _mse
-    r2_score = _r2
-    roc_auc_score = _roc
-    silhouette_score = _sil
-    XGBClassifier = _XGBc
-    XGBRegressor = _XGBr
-    _SKLEARN_VERSION = _sk.__version__
-    _XGBOOST_VERSION = _xgb_mod.__version__
-    _ML_LOADED = True
+# Running library versions — embedded into every saved artifact.
+_SKLEARN_VERSION: str = sklearn.__version__
+_XGBOOST_VERSION: str = _xgb_module.__version__
 
 from app.services.feature_extractor import (
     CLUSTERING_FEATURES,
@@ -177,7 +122,7 @@ _ARCHETYPE_SIGNALS: list[dict] = [
 ]
 
 
-def _auto_label_clusters(centroid_df) -> dict[int, str]:
+def _auto_label_clusters(centroid_df: pd.DataFrame) -> dict[int, str]:
     """Assign archetype labels to KMeans cluster IDs from centroid data.
 
     Method:
@@ -267,7 +212,6 @@ def _route_slug(artifact_key: str) -> str:
 
 
 def _load_model(name: str) -> dict:
-    _load_ml()
     """Load and validate a model artifact from disk with version compatibility check.
 
     Version mismatch policy:
@@ -368,7 +312,6 @@ def invalidate_model_cache(name: str | None = None) -> None:
 
 
 def train_playstyle_model(db: Session) -> dict:
-    _load_ml()
     """
     Train KMeans playstyle clustering on all ingested players.
 
@@ -454,7 +397,6 @@ def train_playstyle_model(db: Session) -> dict:
 
 
 def get_player_playstyle(db: Session, puuid: str) -> dict:
-    _load_ml()
     """
     Predict playstyle cluster for one player.
 
@@ -705,7 +647,6 @@ def get_champion_recommendations(
 
 
 def train_win_predictor(db: Session) -> dict:
-    _load_ml()
     """
     Train win prediction classifier on all ingested player match history.
 
@@ -925,7 +866,6 @@ def train_win_predictor(db: Session) -> dict:
 
 
 def predict_win(db: Session, puuid: str, match_id: str) -> dict:
-    _load_ml()
     """
     Predict win probability for a player in a given match.
 
@@ -1078,7 +1018,6 @@ def _train_regression(
     artifact_name: str,
     target_sql_col: str,
 ) -> dict:
-    _load_ml()
     """Shared training logic for KDA and CS/min regression models.
 
     Args:
@@ -1291,7 +1230,6 @@ def train_cs_regressor(db: Session) -> dict:
 
 
 def predict_kda(db: Session, puuid: str, match_id: str) -> dict:
-    _load_ml()
     """
     Predict expected KDA for a player in a given match.
 
@@ -1369,7 +1307,6 @@ def predict_kda(db: Session, puuid: str, match_id: str) -> dict:
 
 
 def predict_cs(db: Session, puuid: str, match_id: str) -> dict:
-    _load_ml()
     """
     Predict expected CS per minute for a player in a given match.
 
@@ -1446,7 +1383,6 @@ def predict_cs(db: Session, puuid: str, match_id: str) -> dict:
 
 
 def train_earlygame_model(db: Session) -> dict:
-    _load_ml()
     """
     Train an early-game win-prediction model from T=10 and T=15 minute
     timeline differentials.
@@ -1621,7 +1557,6 @@ def train_earlygame_model(db: Session) -> dict:
 
 
 def predict_earlygame(db: Session, match_id: str) -> dict:
-    _load_ml()
     """
     Predict the probability that team 100 wins based on T=10/15 min
     timeline differentials.
@@ -1742,7 +1677,6 @@ def get_model_status() -> dict:
 
 
 def run_win_prediction_backtest(db: Session, n_matches: int = 50) -> dict:
-    _load_ml()
     """
     Evaluate the trained win-prediction model against held-out historical matches.
 
@@ -1943,7 +1877,6 @@ def run_win_prediction_backtest(db: Session, n_matches: int = 50) -> dict:
 
 
 def train_champion_clusters(db: Session) -> dict:
-    _load_ml()
     """
     Cluster champions by their aggregate stat profiles using KMeans.
 
