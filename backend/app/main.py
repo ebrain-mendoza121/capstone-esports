@@ -115,6 +115,17 @@ app.include_router(api_router)
 # so monitoring tools and load tests can distinguish "DB busy" from real bugs.
 # ---------------------------------------------------------------------------
 
+def _cors_headers(request: Request) -> dict:
+    """Return CORS headers for the request's origin if it is whitelisted."""
+    origin = request.headers.get("origin", "")
+    if origin in settings.cors_origins:
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+        }
+    return {}
+
+
 @app.exception_handler(SATimeoutError)
 async def _db_timeout_handler(request: Request, exc: SATimeoutError) -> JSONResponse:
     """Connection pool exhausted — return 503 with Retry-After hint."""
@@ -125,7 +136,7 @@ async def _db_timeout_handler(request: Request, exc: SATimeoutError) -> JSONResp
     )
     return JSONResponse(
         status_code=503,
-        headers={"Retry-After": "2"},
+        headers={"Retry-After": "2", **_cors_headers(request)},
         content={
             "error":   "DatabasePoolTimeout",
             "message": "Database connection pool exhausted. Please retry in a moment.",
@@ -145,7 +156,7 @@ async def _db_operational_handler(request: Request, exc: SAOperationalError) -> 
     )
     return JSONResponse(
         status_code=503,
-        headers={"Retry-After": "1"},
+        headers={"Retry-After": "1", **_cors_headers(request)},
         content={
             "error":   "DatabaseOperationalError",
             "message": "Transient database error. Please retry.",
@@ -176,6 +187,7 @@ async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSON
     )
     return JSONResponse(
         status_code=500,
+        headers=_cors_headers(request),
         content={
             "error":   type(exc).__name__,
             "message": str(exc) or "An unexpected server error occurred.",
