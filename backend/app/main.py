@@ -40,22 +40,8 @@ settings = get_settings()
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # noqa: ARG001
-    """Pre-warm Data Dragon caches on startup so first requests pay no I/O cost."""
-    try:
-        # Load full champion map (metadata + image URLs + role affinity) so that
-        # /champions endpoints and team builder serve requests instantly.
-        # get_champion_full_map() also populates the simple _champion_map cache,
-        # so callers of get_champion_map() benefit too.
-        from app.services.ddragon import get_champion_full_map, get_rune_map
-        champ_map = await get_champion_full_map()
-        rune_map  = await get_rune_map()
-        logger.info(
-            "DDragon caches ready: %d champions (full metadata), %d rune entries",
-            len(champ_map),
-            len(rune_map),
-        )
-    except Exception as exc:                        # pragma: no cover
-        logger.warning("DDragon preload failed at startup: %s", exc)
+    """Lifespan handler — DDragon caches load lazily on first request to save memory."""
+    logger.info("App startup complete — DDragon caches will load on first request.")
     yield  # application runs
     # (shutdown cleanup goes here if ever needed)
 
