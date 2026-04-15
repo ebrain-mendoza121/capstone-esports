@@ -319,10 +319,10 @@ export interface MatchDetail {
 }
 
 export interface DraftData {
-  team100_bans: string[];
-  team200_bans: string[];
-  team100_picks: string[];
-  team200_picks: string[];
+  team100_bans: number[];
+  team200_bans: number[];
+  team100_picks: number[];
+  team200_picks: number[];
 }
 
 export interface BanEntry {
