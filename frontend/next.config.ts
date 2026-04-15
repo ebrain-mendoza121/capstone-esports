@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  env: {
+    NEXT_PUBLIC_API_URL: "https://capstone-esports-production.up.railway.app",
+  },
 };
 
 export default nextConfig;
