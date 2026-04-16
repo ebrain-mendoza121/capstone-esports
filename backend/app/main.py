@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import traceback
 from contextlib import asynccontextmanager
 
@@ -40,22 +41,85 @@ settings = get_settings()
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):  # noqa: ARG001
-    """Pre-warm Data Dragon caches on startup so first requests pay no I/O cost."""
+    """
+    Pre-warm all expensive caches before Railway routes traffic to the app.
+
+    Without this, the first batch of 50 concurrent Locust requests all hit cold
+    caches simultaneously.  Even with stampede protection (only one thread runs
+    the compute), the single cold-start query can exceed Railway's 30-s gateway
+    timeout and produce a 504.  By warming here, every subsequent request is a
+    fast cache read.
+
+    Warming order:
+      1. DDragon champion/rune maps (async, network)
+      2. Global analytics caches (role baselines, most-banned) — needs champion_map
+      3. Player list cache (full GROUP BY)
+      4. Per-player metrics + trends caches for all tracked players
+    """
+    # 1. DDragon -----------------------------------------------------------------
+    champion_map: dict = {}
     try:
-        # Load full champion map (metadata + image URLs + role affinity) so that
-        # /champions endpoints and team builder serve requests instantly.
-        # get_champion_full_map() also populates the simple _champion_map cache,
-        # so callers of get_champion_map() benefit too.
         from app.services.ddragon import get_champion_full_map, get_rune_map
-        champ_map = await get_champion_full_map()
-        rune_map  = await get_rune_map()
+        champion_map = await get_champion_full_map()
+        rune_map     = await get_rune_map()
         logger.info(
             "DDragon caches ready: %d champions (full metadata), %d rune entries",
-            len(champ_map),
+            len(champion_map),
             len(rune_map),
         )
-    except Exception as exc:                        # pragma: no cover
+    except Exception as exc:
         logger.warning("DDragon preload failed at startup: %s", exc)
+
+    # 2–4. DB caches — run synchronously in a thread so the async lifespan doesn't block
+    import asyncio
+    import threading
+
+    def _warm_db_caches() -> None:
+        from app.db.session import SessionLocal
+        from app.api.routes.analytics import warm_analytics_caches, _trends_cache
+        from app.api.routes.players import warm_players_cache
+        from app.api.routes.metrics import _metrics_cache
+        from app.services.metrics_service import get_player_metrics
+        from app.services.feature_extractor import get_rolling_features
+        from app.models.player import Player
+
+        db = SessionLocal()
+        try:
+            # 2. Global analytics (PERCENTILE_CONT + most-banned GROUP BY)
+            warm_analytics_caches(db, champion_map)
+
+            # 3. Player list (GROUP BY participant_stats)
+            warm_players_cache(db)
+
+            # 4. Per-player caches: metrics + trends for every tracked player
+            puuids = [row[0] for row in db.query(Player.puuid).all()]
+            logger.info("Warming per-player caches for %d players…", len(puuids))
+            for puuid in puuids:
+                try:
+                    _metrics_cache.get_or_compute(puuid, lambda p=puuid: get_player_metrics(db, p))
+                except Exception as exc:
+                    logger.debug("metrics warm failed for %s: %s", puuid, exc)
+                try:
+                    before_ts = int(time.time() * 1000)
+                    _trends_cache.get_or_compute(
+                        (puuid, 20),
+                        lambda p=puuid: get_rolling_features(db, p, before_ts=before_ts, window=20),
+                    )
+                except Exception as exc:
+                    logger.debug("trends warm failed for %s: %s", puuid, exc)
+            logger.info("Startup cache warm-up complete.")
+        except Exception as exc:
+            logger.warning("DB cache warm-up failed: %s", exc)
+        finally:
+            db.close()
+
+    # Run warming in a background thread; don't let failures block startup
+    t = threading.Thread(target=_warm_db_caches, daemon=True, name="cache-warmer")
+    t.start()
+    # Give the warmer a head-start before we yield (accept traffic).
+    # 8 seconds is enough for the PERCENTILE_CONT query on a cold DB.
+    await asyncio.sleep(8)
+
     yield  # application runs
     # (shutdown cleanup goes here if ever needed)
 

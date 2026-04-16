@@ -4,17 +4,26 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import OperationalError as SAOperationalError, TimeoutError as SATimeoutError
 from sqlalchemy.orm import Session
 
+from app.core.cache import TTLCacheDict
 from app.db.session import get_db
 from app.services.metrics_service import get_player_metrics
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
+# Per-puuid metrics cache.  get_player_metrics() aggregates the full
+# derived_metrics table — expensive under concurrent load with no caching.
+# TTLCacheDict gives each puuid its own stampede-safe 5-minute slot.
+_metrics_cache: TTLCacheDict = TTLCacheDict()
+
 
 @router.get("/player/{puuid}")
 def player_metrics(puuid: str, db: Session = Depends(get_db)):
     try:
-        result = get_player_metrics(db, puuid)
+        result = _metrics_cache.get_or_compute(
+            puuid,
+            lambda: get_player_metrics(db, puuid),
+        )
     except (SAOperationalError, SATimeoutError):
         # Let the app-level handlers in main.py convert these to 503 responses.
         # Catching them here and re-raising as HTTPException(500) would hide the

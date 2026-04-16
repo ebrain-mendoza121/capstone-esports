@@ -1,6 +1,5 @@
 import logging
 import time
-import threading
 from typing import Dict, List, Any, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,6 +7,7 @@ from sqlalchemy.exc import OperationalError as SAOperationalError, TimeoutError 
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, text, Integer
 
+from app.core.cache import TTLCache, TTLCacheDict
 from app.db.session import get_db
 from app.models.player import Player
 from app.models.match import Match
@@ -24,35 +24,93 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 # ---------------------------------------------------------------------------
-# Simple in-process TTL cache — avoids repeated full-table scans for the two
-# O(all-data) queries: global role baselines and most-banned champions.
-# Thread-safe via a per-cache lock.  TTL is conservative (5 min) so cached
-# data stays fresh enough for a capstone demo.
+# In-process TTL caches — avoids repeated full-table scans for expensive
+# O(all-data) queries.  Shared cache classes live in app.core.cache so other
+# modules (metrics, players) can use the same stampede-safe implementation
+# without duplicating code.
 # ---------------------------------------------------------------------------
-_CACHE_TTL = 300  # seconds
-
-class _TTLCache:
-    """Minimal thread-safe TTL cache for a single computed value."""
-
-    def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._value: Optional[Any] = None
-        self._expires_at: float = 0.0
-
-    def get(self) -> Optional[Any]:
-        with self._lock:
-            if time.monotonic() < self._expires_at:
-                return self._value
-            return None
-
-    def set(self, value: Any) -> None:
-        with self._lock:
-            self._value = value
-            self._expires_at = time.monotonic() + _CACHE_TTL
+_global_role_cache: TTLCache     = TTLCache()
+_most_banned_cache: TTLCache     = TTLCache()
+_trends_cache:      TTLCacheDict = TTLCacheDict()
 
 
-_global_role_cache: _TTLCache = _TTLCache()
-_most_banned_cache: _TTLCache = _TTLCache()
+# ---------------------------------------------------------------------------
+# Module-level compute functions — extracted so the startup warmer in main.py
+# can pre-populate caches before Railway routes any traffic to the app.
+# ---------------------------------------------------------------------------
+
+def _compute_global_roles_sql(db: Session) -> Dict[str, Any]:
+    """Run the expensive PERCENTILE_CONT global role baseline query."""
+    global_role_sql = text("""
+        SELECT
+            ps.role,
+            COUNT(*)                                      AS total_games,
+            ROUND(AVG(ps.win::int)::numeric, 4)           AS global_win_rate,
+            ROUND(AVG(dm.kda)::numeric, 3)                AS global_avg_kda,
+            ROUND(AVG(dm.cs_per_min)::numeric, 3)         AS global_avg_cs,
+            PERCENTILE_CONT(0.25) WITHIN GROUP
+                (ORDER BY ps.win::int)                    AS wr_p25,
+            PERCENTILE_CONT(0.50) WITHIN GROUP
+                (ORDER BY ps.win::int)                    AS wr_p50,
+            PERCENTILE_CONT(0.75) WITHIN GROUP
+                (ORDER BY ps.win::int)                    AS wr_p75,
+            PERCENTILE_CONT(0.25) WITHIN GROUP
+                (ORDER BY dm.cs_per_min)                  AS cs_p25,
+            PERCENTILE_CONT(0.50) WITHIN GROUP
+                (ORDER BY dm.cs_per_min)                  AS cs_p50,
+            PERCENTILE_CONT(0.75) WITHIN GROUP
+                (ORDER BY dm.cs_per_min)                  AS cs_p75
+        FROM participant_stats ps
+        JOIN players p ON p.id = ps.player_id
+        JOIN derived_metrics dm
+          ON dm.match_id = ps.match_id AND dm.puuid = p.puuid
+        WHERE ps.role IN ('TOP','JUNGLE','MIDDLE','BOTTOM','UTILITY')
+        GROUP BY ps.role
+    """)
+    return {
+        row["role"]: dict(row)
+        for row in db.execute(global_role_sql).mappings().all()
+    }
+
+
+def _compute_most_banned_sql(db: Session, champion_map: Dict[int, str]) -> List:
+    """Run the GROUP BY most-banned champion scan."""
+    most_banned = (
+        db.query(TeamBans.champion_id, func.count(TeamBans.id).label("ban_count"))
+        .group_by(TeamBans.champion_id)
+        .order_by(desc("ban_count"))
+        .all()
+    )
+    return [
+        {
+            "champion_id":   champ_id,
+            "champion_name": champion_map.get(champ_id),
+            "ban_count":     count,
+        }
+        for champ_id, count in most_banned
+    ]
+
+
+def warm_analytics_caches(db: Session, champion_map: Dict[int, str]) -> None:
+    """
+    Pre-populate the expensive global analytics caches.
+
+    Called from the app lifespan so these are warm before Railway sends any
+    traffic.  Without pre-warming, the first concurrent batch of 50 requests
+    all hit a cold PERCENTILE_CONT query simultaneously, and Railway's 30-s
+    gateway timeout fires before the single allowed compute thread finishes.
+    """
+    try:
+        _global_role_cache.get_or_compute(lambda: _compute_global_roles_sql(db))
+        logger.info("warm_analytics_caches: global role baselines ready")
+    except Exception as exc:
+        logger.warning("warm_analytics_caches: role baseline failed — %s", exc)
+
+    try:
+        _most_banned_cache.get_or_compute(lambda: _compute_most_banned_sql(db, champion_map))
+        logger.info("warm_analytics_caches: most-banned ready")
+    except Exception as exc:
+        logger.warning("warm_analytics_caches: most-banned failed — %s", exc)
 
 
 @router.get("/player/{puuid}/bans")
@@ -183,27 +241,11 @@ async def get_most_banned_champions(
     """Most banned champions across all stored matches."""
     champion_map = await get_champion_map()
 
-    # Cache the full-table GROUP BY so concurrent requests share one DB hit.
-    cached: Optional[List] = _most_banned_cache.get()
-    if cached is not None:
-        return cached[:limit]
-
-    most_banned = (
-        db.query(TeamBans.champion_id, func.count(TeamBans.id).label("ban_count"))
-        .group_by(TeamBans.champion_id)
-        .order_by(desc("ban_count"))
-        .all()  # fetch all, slice in Python so cache works for any limit
+    # Stampede-safe cache: only one thread runs the GROUP BY scan at a time.
+    # _compute_most_banned_sql is module-level so the startup warmer can call it.
+    result: List = _most_banned_cache.get_or_compute(
+        lambda: _compute_most_banned_sql(db, champion_map)
     )
-
-    result = [
-        {
-            "champion_id": champ_id,
-            "champion_name": champion_map.get(champ_id),
-            "ban_count": count,
-        }
-        for champ_id, count in most_banned
-    ]
-    _most_banned_cache.set(result)
     return result[:limit]
 
 
@@ -328,41 +370,14 @@ async def get_role_performance(
         }
 
     # Step 2: global stats per role across ALL tracked players (peer baseline).
-    # This full-table PERCENTILE_CONT scan is expensive — cache for 5 minutes so
-    # concurrent requests don't each trigger an independent full-table scan.
-    global_rows: Dict[str, Any] = _global_role_cache.get()  # type: ignore[assignment]
-    if global_rows is None:
-        global_role_sql = text("""
-            SELECT
-                ps.role,
-                COUNT(*)                                      AS total_games,
-                ROUND(AVG(ps.win::int)::numeric, 4)           AS global_win_rate,
-                ROUND(AVG(dm.kda)::numeric, 3)                AS global_avg_kda,
-                ROUND(AVG(dm.cs_per_min)::numeric, 3)         AS global_avg_cs,
-                PERCENTILE_CONT(0.25) WITHIN GROUP
-                    (ORDER BY ps.win::int)                    AS wr_p25,
-                PERCENTILE_CONT(0.50) WITHIN GROUP
-                    (ORDER BY ps.win::int)                    AS wr_p50,
-                PERCENTILE_CONT(0.75) WITHIN GROUP
-                    (ORDER BY ps.win::int)                    AS wr_p75,
-                PERCENTILE_CONT(0.25) WITHIN GROUP
-                    (ORDER BY dm.cs_per_min)                  AS cs_p25,
-                PERCENTILE_CONT(0.50) WITHIN GROUP
-                    (ORDER BY dm.cs_per_min)                  AS cs_p50,
-                PERCENTILE_CONT(0.75) WITHIN GROUP
-                    (ORDER BY dm.cs_per_min)                  AS cs_p75
-            FROM participant_stats ps
-            JOIN players p ON p.id = ps.player_id
-            JOIN derived_metrics dm
-              ON dm.match_id = ps.match_id AND dm.puuid = p.puuid
-            WHERE ps.role IN ('TOP','JUNGLE','MIDDLE','BOTTOM','UTILITY')
-            GROUP BY ps.role
-        """)
-        global_rows = {
-            row["role"]: dict(row)
-            for row in db.execute(global_role_sql).mappings().all()
-        }
-        _global_role_cache.set(global_rows)
+    # PERCENTILE_CONT over the full table is expensive. get_or_compute() ensures
+    # only ONE thread runs this query even under 50 concurrent callers — the rest
+    # wait on a compute lock then read the already-populated cache value.
+    # The compute function is module-level (_compute_global_roles_sql) so it can
+    # also be called from the startup cache warmer.
+    global_rows: Dict[str, Any] = _global_role_cache.get_or_compute(  # type: ignore[assignment]
+        lambda: _compute_global_roles_sql(db)
+    )
 
     def _percentile_label(value: float, p25: float, p50: float, p75: float) -> str:
         if value >= p75:
@@ -461,7 +476,14 @@ def get_player_trends(
         window (int, default 20): rolling window size (also controls series length)
     """
     try:
-        return _get_player_trends_impl(puuid=puuid, window=window, db=db)
+        # Stampede-safe cache keyed by (puuid, window).
+        # Only ONE thread computes per key — concurrent callers wait on the
+        # per-key compute lock then read the already-populated cache value.
+        cache_key = (puuid, window)
+        return _trends_cache.get_or_compute(
+            cache_key,
+            lambda: _get_player_trends_impl(puuid=puuid, window=window, db=db),
+        )
     except (SAOperationalError, SATimeoutError):
         # Let app-level 503 handlers in main.py handle DB pool / connection errors.
         raise

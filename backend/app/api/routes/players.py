@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,11 +7,66 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
+from app.core.cache import TTLCache
 from app.db.session import get_db
 from app.models.player import Player
 from app.models.participant_stats import ParticipantStats
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# In-process TTL cache for the player list.
+# GET /players/ runs a full GROUP BY across participant_stats on every call —
+# expensive under load.  Cache the result for 5 minutes; data is only stale
+# while a new match is being ingested, which is acceptable for analytics.
+# ---------------------------------------------------------------------------
+_players_list_cache: TTLCache = TTLCache()
+
+
+# ---------------------------------------------------------------------------
+# Module-level compute + warm function (callable from startup warmer)
+# ---------------------------------------------------------------------------
+
+def _compute_player_list_sql(db: Session) -> List:
+    """Run the full GROUP BY player list query and return serialisable dicts."""
+    match_count_subq = (
+        db.query(
+            ParticipantStats.player_id,
+            func.count(ParticipantStats.match_id).label("match_count"),
+        )
+        .group_by(ParticipantStats.player_id)
+        .subquery()
+    )
+    results = (
+        db.query(Player, func.coalesce(match_count_subq.c.match_count, 0).label("match_count"))
+        .outerjoin(match_count_subq, match_count_subq.c.player_id == Player.id)
+        .order_by(func.coalesce(match_count_subq.c.match_count, 0).desc())
+        .all()
+    )
+    output = []
+    for player, mc in results:
+        try:
+            output.append(PlayerResponse(
+                id=player.id,
+                riot_id=player.riot_id,
+                tag_line=player.tag_line,
+                puuid=player.puuid,
+                region=player.region,
+                created_at=player.created_at,
+                match_count=int(mc),
+            ))
+        except Exception as exc:
+            logger.warning("Skipping player id=%s: %s", player.id, exc)
+    return output
+
+
+def warm_players_cache(db: Session) -> None:
+    """Pre-populate the player list cache at startup."""
+    try:
+        _players_list_cache.get_or_compute(lambda: _compute_player_list_sql(db))
+        logger.info("warm_players_cache: player list ready")
+    except Exception as exc:
+        logger.warning("warm_players_cache: failed — %s", exc)
 
 
 class PlayerResponse(BaseModel):
@@ -66,6 +121,12 @@ def list_players(
     Ghost participants are opponents ingested alongside tracked players.
     Use min_matches=5 or min_matches=10 to return only properly tracked players.
     """
+    # Only cache the default (min_matches=0, limit=None) call — what the
+    # frontend always sends.  Parametrised calls bypass the cache.
+    if min_matches == 0 and limit is None:
+        return _players_list_cache.get_or_compute(lambda: _compute_player_list_sql(db))
+
+    # Parametrised call — run query directly (no cache)
     match_count_subq = (
         db.query(
             ParticipantStats.player_id,
@@ -74,38 +135,26 @@ def list_players(
         .group_by(ParticipantStats.player_id)
         .subquery()
     )
-
     query = (
         db.query(Player, func.coalesce(match_count_subq.c.match_count, 0).label("match_count"))
         .outerjoin(match_count_subq, match_count_subq.c.player_id == Player.id)
     )
-
     if min_matches > 0:
         query = query.filter(func.coalesce(match_count_subq.c.match_count, 0) >= min_matches)
-
     query = query.order_by(func.coalesce(match_count_subq.c.match_count, 0).desc())
-
     if limit is not None and limit > 0:
         query = query.limit(limit)
 
-    results = query.all()
-
-    output = []
-    for player, mc in results:
+    output: List[PlayerResponse] = []
+    for player, mc in query.all():
         try:
             output.append(PlayerResponse(
-                id=player.id,
-                riot_id=player.riot_id,
-                tag_line=player.tag_line,
-                puuid=player.puuid,
-                region=player.region,
-                created_at=player.created_at,
+                id=player.id, riot_id=player.riot_id, tag_line=player.tag_line,
+                puuid=player.puuid, region=player.region, created_at=player.created_at,
                 match_count=int(mc),
             ))
         except Exception as exc:
-            # Skip individual malformed rows rather than failing the entire list.
-            logger.warning("Skipping player id=%s due to serialization error: %s", player.id, exc)
-
+            logger.warning("Skipping player id=%s: %s", player.id, exc)
     return output
 
 
