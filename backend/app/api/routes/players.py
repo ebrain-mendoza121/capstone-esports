@@ -37,6 +37,19 @@ class PlayerResponse(BaseModel):
 router = APIRouter(prefix="/players", tags=["players"])
 
 
+@router.get("/count", response_model=dict)
+def count_players(db: Session = Depends(get_db)):
+    """
+    Return the total number of players in the database in a single COUNT query.
+
+    Prefer this over ``GET /players/`` when you only need the player count —
+    it avoids loading and serialising every row.
+    """
+    from sqlalchemy import text as sa_text
+    total = db.execute(sa_text("SELECT COUNT(*) FROM players")).scalar() or 0
+    return {"count": int(total)}
+
+
 @router.get("/", response_model=List[PlayerResponse])
 def list_players(
     min_matches: int = 0,

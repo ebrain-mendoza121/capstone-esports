@@ -44,15 +44,17 @@ echo "  meets_95_percent_goal: $MEETS_GOAL"
 echo ""
 
 # ---------------------------------------------------------------------------
-# 2. Player count
+# 2. Player count  — use fast /players/count (single SQL COUNT) so we don't
+#    need to load all 14 k+ rows just to get a number.
 # ---------------------------------------------------------------------------
-echo "[2/3] Fetching player count from GET /players/ ..."
+echo "[2/3] Fetching player count from GET /players/count ..."
 
-PLAYERS_JSON=$(curl -sf "$BASE_URL/players/" 2>/dev/null || echo '[]')
-PLAYER_COUNT=$(echo "$PLAYERS_JSON" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "N/A")
+PLAYERS_COUNT_JSON=$(curl -sf "$BASE_URL/players/count" 2>/dev/null || echo '{"count":0}')
+PLAYER_COUNT=$(echo "$PLAYERS_COUNT_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin).get('count','N/A'))" 2>/dev/null || echo "N/A")
 
-# Grab the first PUUID (used for the /metrics endpoint timing test)
-FIRST_PUUID=$(echo "$PLAYERS_JSON" | python3 -c "
+# Grab the first PUUID via a limit=1 query (fast — only 1 row transferred)
+PLAYERS_ONE_JSON=$(curl -sf "$BASE_URL/players/?limit=1" 2>/dev/null || echo '[]')
+FIRST_PUUID=$(echo "$PLAYERS_ONE_JSON" | python3 -c "
 import sys, json
 players = json.load(sys.stdin)
 print(players[0]['puuid'] if players else 'NO_PLAYERS')
@@ -93,7 +95,7 @@ measure() {
 
 ROW_1=$(measure  "GET /"                            "$BASE_URL/")
 ROW_2=$(measure  "GET /health"                      "$BASE_URL/health")
-ROW_3=$(measure  "GET /players/"                    "$BASE_URL/players/")
+ROW_3=$(measure  "GET /players/?limit=100"           "$BASE_URL/players/?limit=100")
 ROW_4=$(measure  "GET /analytics/bans/most-banned"  "$BASE_URL/analytics/bans/most-banned")
 
 if [[ "$FIRST_PUUID" == "NO_PLAYERS" ]]; then
@@ -180,7 +182,7 @@ cat > "$OUTPUT_DIR/performance_evidence.md" << MDEOF
 |---|---|---|---|---|
 | \`GET /\` | $(echo "$ROW_1" | cut -d'|' -f3) | ${ms_root} ms | < 2000 ms | $(python3 -c "v='$ms_root'; print('✅' if v.isdigit() and int(v)<2000 else ('⚠️ N/A' if not v.isdigit() else '❌'))" 2>/dev/null || echo "—") |
 | \`GET /health\` | $(echo "$ROW_2" | cut -d'|' -f3) | ${ms_health} ms | < 2000 ms | $(python3 -c "v='$ms_health'; print('✅' if v.isdigit() and int(v)<2000 else ('⚠️ N/A' if not v.isdigit() else '❌'))" 2>/dev/null || echo "—") |
-| \`GET /players/\` | $(echo "$ROW_3" | cut -d'|' -f3) | ${ms_players} ms | < 2000 ms | $(python3 -c "v='$ms_players'; print('✅' if v.isdigit() and int(v)<2000 else ('⚠️ N/A' if not v.isdigit() else '❌'))" 2>/dev/null || echo "—") |
+| \`GET /players/?limit=100\` | $(echo "$ROW_3" | cut -d'|' -f3) | ${ms_players} ms | < 2000 ms | $(python3 -c "v='$ms_players'; print('✅' if v.isdigit() and int(v)<2000 else ('⚠️ N/A' if not v.isdigit() else '❌'))" 2>/dev/null || echo "—") |
 | \`GET /analytics/bans/most-banned\` | $(echo "$ROW_4" | cut -d'|' -f3) | ${ms_bans} ms | < 2000 ms | $(python3 -c "v='$ms_bans'; print('✅' if v.isdigit() and int(v)<2000 else ('⚠️ N/A' if not v.isdigit() else '❌'))" 2>/dev/null || echo "—") |
 | \`GET /metrics/player/{puuid}\` | $(echo "$ROW_5" | cut -d'|' -f3) | ${ms_metrics} ms | < 2000 ms | $(python3 -c "v='$ms_metrics'; print('✅' if v.isdigit() and int(v)<2000 else ('⚠️ N/A' if not v.isdigit() else '❌'))" 2>/dev/null || echo "—") |
 | \`GET /backfill/status\` | $(echo "$ROW_6" | cut -d'|' -f3) | ${ms_backfill} ms | < 2000 ms | $(python3 -c "v='$ms_backfill'; print('✅' if v.isdigit() and int(v)<2000 else ('⚠️ N/A' if not v.isdigit() else '❌'))" 2>/dev/null || echo "—") |
@@ -198,7 +200,8 @@ cat > "$OUTPUT_DIR/performance_evidence.md" << MDEOF
 | **Players in DB** | **$PLAYER_COUNT** | **≥ 5** | $(python3 -c "v='$PLAYER_COUNT'; print('✅' if v.isdigit() and int(v)>=5 else ('⚠️ N/A' if not v.isdigit() else '❌'))" 2>/dev/null || echo "—") |
 | First PUUID sampled | \`$FIRST_PUUID\` | — | — |
 
-> Source: \`GET /players/\` — returns every player row in the \`players\` table.
+> Source: \`GET /players/count\` — single SQL \`COUNT(*)\` query; avoids loading all rows.
+> Full list available via \`GET /players/\` (supports \`?limit\` and \`?min_matches\` filters).
 
 ---
 

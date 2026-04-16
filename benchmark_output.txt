@@ -1,0 +1,39 @@
+=== Esports Analytics Backend Benchmark ===
+Target: http://localhost:8000
+Date:   2026-04-15 23:18:36
+
+[1/3] Fetching derived-metric coverage from GET /backfill/status ...
+{
+    "total_matches": 36880,
+    "with_derived_metrics": 36700,
+    "missing_derived_metrics": 180,
+    "coverage_percentage": 99.51,
+    "meets_95_percent_goal": true
+}
+
+  total_matches:         36880
+  with_derived_metrics:  36700
+  coverage_percentage:   99.51%
+  meets_95_percent_goal: True
+
+[2/3] Fetching player count from GET /players/count ...
+  player_count: 14275
+  first_puuid:  GXO6oaJPECfKU3Zr_5CAiUCEpGNGVq5zRrmXWbfoih49CX5D4_bw360rWA9skKW5Qf5PblEY7MNdtA
+
+[3/3] Measuring response times (5 endpoints) ...
+
+Results:
+  Endpoint                                    HTTP  Time(ms)
+  ------------------------------------------  ----  --------
+  GET /                                       200   1
+  GET /health                                 200   1
+  GET /players/?limit=100                     200   1116
+  GET /analytics/bans/most-banned             200   940
+  GET /metrics/player/{puuid}                 200   1150
+  GET /backfill/status                        200   965
+
+Writing performance_evidence.md ...
+
+=== Done ===
+  performance_evidence.md written to: /Users/alexmendozaortiz/Documents/CAPSTONEVS/capstone-esports/performance_evidence.md
+

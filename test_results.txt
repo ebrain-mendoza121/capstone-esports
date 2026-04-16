@@ -1,22 +1,28 @@
 ============================= test session starts ==============================
-platform linux -- Python 3.10.12, pytest-9.0.2, pluggy-1.6.0 -- /tmp/test_venv/bin/python
-rootdir: /sessions/focused-gifted-ride/mnt/capstone-esports/backend
+platform darwin -- Python 3.11.14, pytest-9.0.2, pluggy-1.6.0 -- /Users/alexmendozaortiz/Documents/CAPSTONEVS/capstone-esports/backend/.venv/bin/python3.11
+rootdir: /Users/alexmendozaortiz/Documents/CAPSTONEVS/capstone-esports/backend
 configfile: pytest.ini
-plugins: cov-7.1.0, anyio-4.13.0
+plugins: anyio-4.12.1, cov-7.1.0, locust-2.43.4
 collecting ... collected 124 items
 
-tests/integration/test_ai_endpoints.py::test_model_status_returns_valid_shape <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ai_endpoints.py PASSED [  0%]
-tests/integration/test_ai_endpoints.py::test_model_status_each_entry_has_trained_field <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ai_endpoints.py PASSED [  1%]
-tests/integration/test_ai_endpoints.py::test_train_playstyle_returns_422_on_empty_db <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ai_endpoints.py XFAIL [  2%]
-tests/integration/test_ai_endpoints.py::test_train_win_prediction_returns_422_on_empty_db <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ai_endpoints.py PASSED [  3%]
-tests/integration/test_ai_endpoints.py::test_train_kda_regression_returns_422_on_empty_db <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ai_endpoints.py XFAIL [  4%]
-tests/integration/test_ai_endpoints.py::test_train_cs_regression_returns_422_on_empty_db <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ai_endpoints.py XFAIL [  4%]
-tests/integration/test_ai_endpoints.py::test_train_early_game_returns_422_on_empty_db <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ai_endpoints.py PASSED [  5%]
-tests/integration/test_ai_endpoints.py::test_predict_win_graceful_on_unknown_puuid <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ai_endpoints.py PASSED [  6%]
-tests/integration/test_ai_endpoints.py::test_predict_kda_graceful_on_unknown_puuid <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ai_endpoints.py XFAIL [  7%]
-tests/integration/test_ai_endpoints.py::test_predict_cs_graceful_on_unknown_puuid <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ai_endpoints.py XFAIL [  8%]
-tests/integration/test_ai_endpoints.py::test_early_game_graceful_on_unknown_match <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ai_endpoints.py XFAIL [  8%]
-tests/integration/test_ai_endpoints.py::test_backtest_returns_valid_shape <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ai_endpoints.py PASSED [  9%]
+tests/integration/test_ai_endpoints.py::test_model_status_returns_valid_shape PASSED [  0%]
+tests/integration/test_ai_endpoints.py::test_model_status_each_entry_has_trained_field PASSED [  1%]
+tests/integration/test_ai_endpoints.py::test_train_playstyle_returns_422_on_empty_db XFAILrted by SQLite test database.  Test passes against
+real DB.)                                                                [  2%]
+tests/integration/test_ai_endpoints.py::test_train_win_prediction_returns_422_on_empty_db PASSED [  3%]
+tests/integration/test_ai_endpoints.py::test_train_kda_regression_returns_422_on_empty_db XFAILrted by SQLite test database.  Test passes against
+real DB.)                                                                [  4%]
+tests/integration/test_ai_endpoints.py::test_train_cs_regression_returns_422_on_empty_db XFAILrted by SQLite test database.  Test passes against
+real DB.)                                                                [  4%]
+tests/integration/test_ai_endpoints.py::test_train_early_game_returns_422_on_empty_db PASSED [  5%]
+tests/integration/test_ai_endpoints.py::test_predict_win_graceful_on_unknown_puuid PASSED [  6%]
+tests/integration/test_ai_endpoints.py::test_predict_kda_graceful_on_unknown_puuid XFAILrted by SQLite test database.  Test passes against
+real DB.)                                                                [  7%]
+tests/integration/test_ai_endpoints.py::test_predict_cs_graceful_on_unknown_puuid XFAILrted by SQLite test database.  Test passes against real
+DB.)                                                                     [  8%]
+tests/integration/test_ai_endpoints.py::test_early_game_graceful_on_unknown_match XFAILrted by SQLite test database.  Test passes against real
+DB.)                                                                     [  8%]
+tests/integration/test_ai_endpoints.py::test_backtest_returns_valid_shape PASSED [  9%]
 tests/integration/test_analytics_routes.py::test_player_bans_unknown_puuid_returns_404 PASSED [ 10%]
 tests/integration/test_analytics_routes.py::test_champion_ban_rate_empty_db_returns_zeros PASSED [ 11%]
 tests/integration/test_analytics_routes.py::test_champion_ban_rate_response_shape PASSED [ 12%]
@@ -81,11 +87,11 @@ tests/integration/test_health.py::test_players_empty_list PASSED         [ 55%]
 tests/integration/test_health.py::test_player_not_found PASSED           [ 56%]
 tests/integration/test_health.py::test_matches_empty_for_unknown_player PASSED [ 57%]
 tests/integration/test_health.py::test_metrics_not_found_for_unknown_player XFAIL the SQLite test database. Passes against real DB.) [ 58%]
-tests/integration/test_ingest_validation.py::test_ingest_missing_body_returns_422 <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ingest_validation.py PASSED [ 58%]
-tests/integration/test_ingest_validation.py::test_ingest_missing_game_name_returns_422 <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ingest_validation.py PASSED [ 59%]
-tests/integration/test_ingest_validation.py::test_ingest_missing_tag_line_returns_422 <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ingest_validation.py PASSED [ 60%]
-tests/integration/test_ingest_validation.py::test_ingest_empty_strings_returns_422 <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ingest_validation.py PASSED [ 61%]
-tests/integration/test_ingest_validation.py::test_ingest_invalid_count_type_returns_422 <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/integration/test_ingest_validation.py PASSED [ 62%]
+tests/integration/test_ingest_validation.py::test_ingest_missing_body_returns_422 PASSED [ 58%]
+tests/integration/test_ingest_validation.py::test_ingest_missing_game_name_returns_422 PASSED [ 59%]
+tests/integration/test_ingest_validation.py::test_ingest_missing_tag_line_returns_422 PASSED [ 60%]
+tests/integration/test_ingest_validation.py::test_ingest_empty_strings_returns_422 PASSED [ 61%]
+tests/integration/test_ingest_validation.py::test_ingest_invalid_count_type_returns_422 PASSED [ 62%]
 tests/integration/test_matches_routes.py::test_match_detail_unknown_id_returns_404 PASSED [ 62%]
 tests/integration/test_matches_routes.py::test_match_draft_unknown_id_returns_404 PASSED [ 63%]
 tests/integration/test_matches_routes.py::test_player_match_history_with_limit_param PASSED [ 64%]
@@ -96,36 +102,36 @@ tests/integration/test_timeline_routes.py::test_timeline_frames_by_puuid_unknown
 tests/integration/test_timeline_routes.py::test_timeline_summary_response_shape_when_found PASSED [ 68%]
 tests/integration/test_timeline_routes.py::test_timeline_frames_returns_empty_list_when_no_frames PASSED [ 69%]
 tests/integration/test_timeline_routes.py::test_timeline_frames_limit_param_accepted PASSED [ 70%]
-tests/unit/test_derived_metrics.py::test_basic_metrics_30min_game <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_derived_metrics.py PASSED [ 70%]
-tests/unit/test_derived_metrics.py::test_zero_deaths_kda <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_derived_metrics.py PASSED [ 71%]
-tests/unit/test_derived_metrics.py::test_zero_game_duration <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_derived_metrics.py PASSED [ 72%]
-tests/unit/test_derived_metrics.py::test_zero_team_kills <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_derived_metrics.py PASSED [ 73%]
-tests/unit/test_derived_metrics.py::test_zero_team_damage <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_derived_metrics.py PASSED [ 74%]
-tests/unit/test_derived_metrics.py::test_support_profile <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_derived_metrics.py PASSED [ 75%]
-tests/unit/test_derived_metrics.py::test_extract_team_participants <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_derived_metrics.py PASSED [ 75%]
-tests/unit/test_derived_metrics.py::test_normalize_game_duration_post_patch <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_derived_metrics.py PASSED [ 76%]
-tests/unit/test_derived_metrics.py::test_normalize_game_duration_pre_patch <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_derived_metrics.py PASSED [ 77%]
-tests/unit/test_derived_metrics.py::test_metric_output_rounded <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_derived_metrics.py PASSED [ 78%]
-tests/unit/test_feature_helpers.py::TestLinearTrend::test_upward_trend_returns_positive_slope <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 79%]
-tests/unit/test_feature_helpers.py::TestLinearTrend::test_downward_trend_returns_negative_slope <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 79%]
-tests/unit/test_feature_helpers.py::TestLinearTrend::test_flat_trend_returns_zero <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 80%]
-tests/unit/test_feature_helpers.py::TestLinearTrend::test_single_value_returns_zero <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 81%]
-tests/unit/test_feature_helpers.py::TestLinearTrend::test_empty_list_returns_zero <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 82%]
-tests/unit/test_feature_helpers.py::TestLinearTrend::test_slope_magnitude <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 83%]
-tests/unit/test_feature_helpers.py::TestComputeStreak::test_win_streak <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 83%]
-tests/unit/test_feature_helpers.py::TestComputeStreak::test_loss_streak <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 84%]
-tests/unit/test_feature_helpers.py::TestComputeStreak::test_single_win <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 85%]
-tests/unit/test_feature_helpers.py::TestComputeStreak::test_single_loss <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 86%]
-tests/unit/test_feature_helpers.py::TestComputeStreak::test_empty_list <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 87%]
-tests/unit/test_feature_helpers.py::TestComputeStreak::test_alternating_starts_with_win <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 87%]
-tests/unit/test_feature_helpers.py::TestComputeStreak::test_alternating_starts_with_loss <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 88%]
-tests/unit/test_feature_helpers.py::TestComputeStreak::test_long_win_streak <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 89%]
-tests/unit/test_feature_helpers.py::TestEncodePatch::test_standard_patch <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 90%]
-tests/unit/test_feature_helpers.py::TestEncodePatch::test_double_digit_minor <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 91%]
-tests/unit/test_feature_helpers.py::TestEncodePatch::test_none_returns_zero <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 91%]
-tests/unit/test_feature_helpers.py::TestEncodePatch::test_empty_string_returns_zero <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 92%]
-tests/unit/test_feature_helpers.py::TestEncodePatch::test_malformed_patch_returns_zero <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 93%]
-tests/unit/test_feature_helpers.py::TestEncodePatch::test_newer_patch <- ../../../../intelligent-clever-newton/mnt/capstone-esports/backend/tests/unit/test_feature_helpers.py PASSED [ 94%]
+tests/unit/test_derived_metrics.py::test_basic_metrics_30min_game PASSED [ 70%]
+tests/unit/test_derived_metrics.py::test_zero_deaths_kda PASSED          [ 71%]
+tests/unit/test_derived_metrics.py::test_zero_game_duration PASSED       [ 72%]
+tests/unit/test_derived_metrics.py::test_zero_team_kills PASSED          [ 73%]
+tests/unit/test_derived_metrics.py::test_zero_team_damage PASSED         [ 74%]
+tests/unit/test_derived_metrics.py::test_support_profile PASSED          [ 75%]
+tests/unit/test_derived_metrics.py::test_extract_team_participants PASSED [ 75%]
+tests/unit/test_derived_metrics.py::test_normalize_game_duration_post_patch PASSED [ 76%]
+tests/unit/test_derived_metrics.py::test_normalize_game_duration_pre_patch PASSED [ 77%]
+tests/unit/test_derived_metrics.py::test_metric_output_rounded PASSED    [ 78%]
+tests/unit/test_feature_helpers.py::TestLinearTrend::test_upward_trend_returns_positive_slope PASSED [ 79%]
+tests/unit/test_feature_helpers.py::TestLinearTrend::test_downward_trend_returns_negative_slope PASSED [ 79%]
+tests/unit/test_feature_helpers.py::TestLinearTrend::test_flat_trend_returns_zero PASSED [ 80%]
+tests/unit/test_feature_helpers.py::TestLinearTrend::test_single_value_returns_zero PASSED [ 81%]
+tests/unit/test_feature_helpers.py::TestLinearTrend::test_empty_list_returns_zero PASSED [ 82%]
+tests/unit/test_feature_helpers.py::TestLinearTrend::test_slope_magnitude PASSED [ 83%]
+tests/unit/test_feature_helpers.py::TestComputeStreak::test_win_streak PASSED [ 83%]
+tests/unit/test_feature_helpers.py::TestComputeStreak::test_loss_streak PASSED [ 84%]
+tests/unit/test_feature_helpers.py::TestComputeStreak::test_single_win PASSED [ 85%]
+tests/unit/test_feature_helpers.py::TestComputeStreak::test_single_loss PASSED [ 86%]
+tests/unit/test_feature_helpers.py::TestComputeStreak::test_empty_list PASSED [ 87%]
+tests/unit/test_feature_helpers.py::TestComputeStreak::test_alternating_starts_with_win PASSED [ 87%]
+tests/unit/test_feature_helpers.py::TestComputeStreak::test_alternating_starts_with_loss PASSED [ 88%]
+tests/unit/test_feature_helpers.py::TestComputeStreak::test_long_win_streak PASSED [ 89%]
+tests/unit/test_feature_helpers.py::TestEncodePatch::test_standard_patch PASSED [ 90%]
+tests/unit/test_feature_helpers.py::TestEncodePatch::test_double_digit_minor PASSED [ 91%]
+tests/unit/test_feature_helpers.py::TestEncodePatch::test_none_returns_zero PASSED [ 91%]
+tests/unit/test_feature_helpers.py::TestEncodePatch::test_empty_string_returns_zero PASSED [ 92%]
+tests/unit/test_feature_helpers.py::TestEncodePatch::test_malformed_patch_returns_zero PASSED [ 93%]
+tests/unit/test_feature_helpers.py::TestEncodePatch::test_newer_patch PASSED [ 94%]
 tests/unit/test_metrics_aggregation.py::test_primary_path_returns_all_fields PASSED [ 95%]
 tests/unit/test_metrics_aggregation.py::test_primary_path_none_fields_default_to_zero PASSED [ 95%]
 tests/unit/test_metrics_aggregation.py::test_fallback_no_matches_returns_none PASSED [ 96%]
@@ -134,32 +140,54 @@ tests/unit/test_metrics_aggregation.py::test_fallback_win_rate_calculation PASSE
 tests/unit/test_metrics_aggregation.py::test_fallback_zero_deaths_no_zerodivision PASSED [ 99%]
 tests/unit/test_metrics_aggregation.py::test_fallback_zero_duration_game PASSED [100%]
 
-=============================== warnings summary ===============================
-app/api/routes/players.py:13
-  /sessions/focused-gifted-ride/mnt/capstone-esports/backend/app/api/routes/players.py:13: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.12/migration/
-    class PlayerResponse(BaseModel):
+================================ tests coverage ================================
+______________ coverage: platform darwin, python 3.11.14-final-0 _______________
 
-tests/integration/test_ai_endpoints.py::test_model_status_returns_valid_shape
-tests/integration/test_ai_endpoints.py::test_model_status_each_entry_has_trained_field
-  /sessions/focused-gifted-ride/.local/lib/python3.10/site-packages/sklearn/base.py:442: InconsistentVersionWarning: Trying to unpickle estimator KMeans from version 1.8.0 when using version 1.7.2. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
-  https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
-    warnings.warn(
-
-tests/integration/test_ai_endpoints.py::test_model_status_returns_valid_shape
-tests/integration/test_ai_endpoints.py::test_model_status_each_entry_has_trained_field
-  /sessions/focused-gifted-ride/.local/lib/python3.10/site-packages/sklearn/base.py:442: InconsistentVersionWarning: Trying to unpickle estimator StandardScaler from version 1.8.0 when using version 1.7.2. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
-  https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
-    warnings.warn(
-
-tests/integration/test_ai_endpoints.py::test_model_status_returns_valid_shape
-  /sessions/focused-gifted-ride/.local/lib/python3.10/site-packages/sklearn/base.py:442: InconsistentVersionWarning: Trying to unpickle estimator Ridge from version 1.8.0 when using version 1.7.2. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
-  https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
-    warnings.warn(
-
-tests/integration/test_ai_endpoints.py::test_model_status_returns_valid_shape
-  /sessions/focused-gifted-ride/.local/lib/python3.10/site-packages/sklearn/base.py:442: InconsistentVersionWarning: Trying to unpickle estimator LogisticRegression from version 1.8.0 when using version 1.7.2. This might lead to breaking code or invalid results. Use at your own risk. For more info please refer to:
-  https://scikit-learn.org/stable/model_persistence.html#security-maintainability-limitations
-    warnings.warn(
-
--- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-================= 113 passed, 11 xfailed, 7 warnings in 17.16s =================
+Name                                         Stmts   Miss  Cover   Missing
+--------------------------------------------------------------------------
+app/__init__.py                                  0      0   100%
+app/api/__init__.py                              0      0   100%
+app/api/router.py                               24      0   100%
+app/api/routes/__init__.py                       0      0   100%
+app/api/routes/ai.py                           134     54    60%   80, 110-113, 122, 135, 196-198, 238-315, 357-374, 387-390, 414, 430, 557-624, 662-669
+app/api/routes/analytics.py                    167     98    41%   41-99, 129-137, 196-215, 264-388, 423, 426-428, 441-507, 589-613, 644-689
+app/api/routes/backfill.py                     188    147    22%   82-173, 188-203, 223-266, 281-297, 315-376, 388-392, 416-463, 480-504
+app/api/routes/champions.py                    128     20    84%   98-109, 157, 232, 328-331, 335-339, 401-404, 457-462
+app/api/routes/health.py                        12      2    83%   17-18
+app/api/routes/ingest.py                        43     28    35%   46-86, 106-147
+app/api/routes/matches.py                       54     26    52%   26-79, 92-124, 211-249
+app/api/routes/matchups.py                     187    160    14%   55-59, 68, 96-286, 311-327, 370-434, 458-521
+app/api/routes/metrics.py                       20      6    70%   23-31
+app/api/routes/players.py                       53     11    79%   34, 48-50, 84, 89, 95-107, 118
+app/api/routes/teams.py                        293     36    88%   92, 99, 111, 127, 129, 258, 261, 540, 545-566, 611, 613, 668-705
+app/api/routes/timeline.py                      61     28    54%   75, 124-154, 207-231
+app/core/__init__.py                             0      0   100%
+app/core/limiter.py                              3      0   100%
+app/core/settings.py                            23      1    96%   35
+app/db/__init__.py                               0      0   100%
+app/db/crud_ingest.py                          168    145    14%   42-99, 116-169, 174-185, 189, 201-212, 232-409, 431-483
+app/db/session.py                               16      4    75%   51-55
+app/main.py                                     71     10    86%   92-99, 121-126, 170-177, 198-199
+app/models/champion_matchups.py                 19      0   100%
+app/models/derived_metrics.py                   19      0   100%
+app/models/draft_actions.py                     25      0   100%
+app/models/match.py                             25      0   100%
+app/models/match_timeline.py                    40      0   100%
+app/models/participant_perks.py                 23      0   100%
+app/models/participant_stats.py                 52      0   100%
+app/models/player.py                            14      0   100%
+app/models/team_bans.py                         12      0   100%
+app/models/team_objectives.py                   23      0   100%
+app/schemas/ingest.py                           61      4    93%   58, 64-66
+app/services/ai_service.py                     929    629    32%   146-191, 231-232, 253-254, 261, 270, 294-295, 303-308, 332-386, 423-459, 497-643, 674-849, 886-949, 1041-1167, 1253-1254, 1272-1295, 1329-1330, 1348-1371, 1423-1544, 1577-1578, 1590-1621, 1670, 1716-1717, 1753-1887, 1925-2040, 2055-2061, 2115-2116, 2129-2155, 2206, 2216, 2218, 2220, 2222, 2224, 2302, 2311-2319, 2321, 2336-2337, 2339-2340, 2351, 2371, 2377-2380, 2394, 2396, 2437-2445, 2449-2453, 2460, 2483-2490, 2519-2520, 2535-2540, 2558-2560, 2568-2576, 2631-2742, 2804-2835, 2870-2880, 2909-2945, 2984-3030
+app/services/champion_role_tiers.py             97     13    87%   54, 73, 79, 91-92, 104, 110-111, 125-127, 146, 155
+app/services/ddragon.py                        143     42    71%   120-127, 137-164, 200, 203-204, 236-237, 273-274, 281, 290-291
+app/services/derived_metrics_calculator.py      35      3    91%   74-76
+app/services/feature_extractor.py              354    286    19%   149-198, 203-207, 248-257, 292-308, 313-317, 388-398, 420-522, 550-702, 714-749, 773-872, 904, 979-1051, 1131-1327, 1350, 1382-1455
+app/services/ingestion_service.py               67     57    15%   39-155
+app/services/metrics_service.py                 32      0   100%
+app/services/riot_client.py                     90     67    26%   39-42, 49, 52, 55, 70-71, 80-112, 122-129, 139-155, 158-164, 167-173, 188-208
+app/services/riot_live_service.py              113     95    16%   61-65, 77-115, 137-162, 191-266, 298-318, 337-346
+--------------------------------------------------------------------------
+TOTAL                                         3818   1972    48%
+======================= 113 passed, 11 xfailed in 2.04s ========================

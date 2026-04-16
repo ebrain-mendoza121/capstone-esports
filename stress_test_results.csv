@@ -1,0 +1,22 @@
+Metric,Measured Value,Proposal Target,Result
+Concurrent Users,50,≥ 50,PASS
+Total Requests,98,—,—
+Failure Count,1,—,—
+Failure Rate,1.02%,< 1%,NEAR-MISS
+Median Response Time (p50),32000 ms,< 2000 ms,FAIL
+75th Percentile (p75),53000 ms,—,—
+90th Percentile (p90),77000 ms,—,—
+95th Percentile (p95),82000 ms,< 2000 ms,FAIL
+99th Percentile (p99),85000 ms,—,—
+Maximum Response Time,85000 ms,—,—
+
+Endpoint,Requests,Failures,p50 (ms),p95 (ms),Notes
+GET /analytics/bans/most-banned,3,0,19000,111000,DB-bound aggregation
+GET /analytics/champion/{id}/ban-rate,2,0,16069,99000,DB-bound aggregation
+GET /analytics/player/{puuid}/bans,5,0,18000,101000,DB-bound aggregation
+GET /analytics/player/{puuid}/role-performance,5,1,13000,19000,1 ConnectionResetError — Supabase statement timeout
+GET /analytics/player/{puuid}/trends,1,0,19828,20000,DB-bound aggregation
+GET /champions,11,0,5600,109000,First request cold-start; subsequent hits in-process cache
+GET /health,3,0,8500,12000,No DB — high latency due to thread-pool starvation
+GET /metrics/player/{puuid},6,0,19000,20000,DB-bound aggregation
+GET /players/,4,0,19000,113000,DB-bound aggregation

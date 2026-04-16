@@ -7,6 +7,7 @@ snake_case in OpenAPI docs automatically).
 Endpoint map:
   POST /ai/train/playstyle           → train KMeans playstyle model
   POST /ai/train/win-prediction      → train win-prediction classifier
+    POST /ai/train/all                 → train all models sequentially
   POST /ai/train/kda-regression      → train KDA regression model
   POST /ai/train/cs-regression       → train CS/min regression model
   POST /ai/train/early-game          → train early-game predictor
@@ -27,10 +28,10 @@ MUST NOT bleed into URLs.  The ``_ARTIFACT_ROUTE_SLUG`` mapping in
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.services.ai_service import (
     InsufficientDataError,
     ModelNotTrainedError,
@@ -44,6 +45,7 @@ from app.services.ai_service import (
     predict_win,
     run_win_prediction_backtest,
     train_cs_regressor,
+    train_champion_clusters,
     train_earlygame_model,
     train_kda_regressor,
     train_matchup_predictor,
@@ -61,114 +63,256 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 # ---------------------------------------------------------------------------
 
 
+def _run_playstyle_training_bg() -> None:
+    db = SessionLocal()
+    try:
+        result = train_playstyle_model(db)
+        logger.info("Playstyle training complete: %s", result)
+    except Exception:
+        logger.exception("Playstyle background training failed")
+    finally:
+        db.close()
+
+
+def _run_win_prediction_training_bg() -> None:
+    db = SessionLocal()
+    try:
+        result = train_win_predictor(db)
+        logger.info("Win-prediction training complete: %s", result)
+    except Exception:
+        logger.exception("Win-prediction background training failed")
+    finally:
+        db.close()
+
+
+def _run_matchup_training_bg() -> None:
+    db = SessionLocal()
+    try:
+        result = train_matchup_predictor(db)
+        logger.info("Matchup-prediction training complete: %s", result)
+    except Exception:
+        logger.exception("Matchup-prediction background training failed")
+    finally:
+        db.close()
+
+
+def _run_earlygame_training_bg() -> None:
+    db = SessionLocal()
+    try:
+        result = train_earlygame_model(db)
+        logger.info("Early-game training complete: %s", result)
+    except Exception:
+        logger.exception("Early-game background training failed")
+    finally:
+        db.close()
+
+
+def _run_champion_clusters_bg() -> None:
+    db = SessionLocal()
+    try:
+        result = train_champion_clusters(db)
+        logger.info("Champion-clusters training complete: %s", result)
+    except Exception:
+        logger.exception("Champion-clusters background training failed")
+    finally:
+        db.close()
+
+
+def _run_train_all_bg() -> None:
+    """Train all models sequentially in one background worker."""
+    db = SessionLocal()
+    summary: dict[str, dict] = {}
+    trainers = [
+        ("playstyle_kmeans", train_playstyle_model),
+        ("win_predictor", train_win_predictor),
+        ("matchup_predictor", train_matchup_predictor),
+        ("kda_regressor", train_kda_regressor),
+        ("cs_regressor", train_cs_regressor),
+        ("earlygame_predictor", train_earlygame_model),
+        ("champion_clusters", train_champion_clusters),
+    ]
+
+    try:
+        for model_name, trainer in trainers:
+            try:
+                result = trainer(db)
+                summary[model_name] = {"status": "trained", "result": result}
+            except InsufficientDataError as exc:
+                summary[model_name] = {
+                    "status": "skipped",
+                    "error_type": "InsufficientDataError",
+                    "error": str(exc),
+                }
+            except Exception as exc:
+                logger.exception("Train-all step failed for %s", model_name)
+                summary[model_name] = {
+                    "status": "failed",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+        logger.info("Train-all complete: %s", summary)
+    finally:
+        db.close()
+
+
 @router.post("/train/playstyle", summary="Train playstyle clustering model")
-def train_playstyle(db: Session = Depends(get_db)) -> dict:
+def train_playstyle(
+    background_tasks: BackgroundTasks,
+    response: Response,
+) -> dict:
     """
     Train the KMeans playstyle clustering model on all ingested players.
 
-    Returns training metrics and centroid snapshots.  After training,
-    review ``CLUSTER_LABELS`` in ``ai_service.py`` and update label
-    names to match the centroid characteristics before exposing
-    ``GET /ai/playstyle/{puuid}`` to end users.
-
-    Raises 422 when the database has fewer than 20 players with 10+
-    ranked matches.
+    Returns **202 Accepted** immediately; training runs in the background.
+    Poll ``GET /ai/models/status`` to check when ``playstyle`` is ready.
     """
-    try:
-        return train_playstyle_model(db)
-    except InsufficientDataError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    background_tasks.add_task(_run_playstyle_training_bg)
+    response.status_code = 202
+    return {"status": "accepted", "message": "Playstyle training started in background. Poll /ai/models/status for completion."}
 
 
 @router.post("/train/win-prediction", summary="Train win-prediction classifier")
-def train_win_prediction(db: Session = Depends(get_db)) -> dict:
+def train_win_prediction(
+    background_tasks: BackgroundTasks,
+    response: Response,
+) -> dict:
     """
     Train the win-prediction model (Logistic Regression vs XGBoost).
-    The better model by ROC-AUC is saved to ``win_predictor.joblib``.
 
-    Raises 422 when fewer than 100 labeled training rows exist.
+    Returns **202 Accepted** immediately; training runs in the background.
+    Poll ``GET /ai/models/status`` to check when ``win_predictor`` is ready.
     """
-    try:
-        return train_win_predictor(db)
-    except InsufficientDataError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    background_tasks.add_task(_run_win_prediction_training_bg)
+    response.status_code = 202
+    return {"status": "accepted", "message": "Win-prediction training started in background. Poll /ai/models/status for completion."}
 
 
 @router.post("/train/matchup-prediction", summary="Train match-level win-prediction model")
-def train_matchup_prediction(db: Session = Depends(get_db)) -> dict:
+def train_matchup_prediction(
+    background_tasks: BackgroundTasks,
+    response: Response,
+) -> dict:
     """
     Train the matchup-level win-prediction model.
 
-    Unlike /train/win-prediction (per-player rows), this model trains on one
-    row per match using team-vs-team differential features. This directly
-    captures relative team strength rather than isolated player stats,
-    resulting in meaningfully higher AUC.
-
-    Requires at least 50 unique ranked matches in the database.
-    Model saved to matchup_predictor.joblib.
+    Returns **202 Accepted** immediately; training runs in the background.
+    Poll ``GET /ai/models/status`` to check when ``matchup_predictor`` is ready.
     """
+    background_tasks.add_task(_run_matchup_training_bg)
+    response.status_code = 202
+    return {"status": "accepted", "message": "Matchup-prediction training started in background. Poll /ai/models/status for completion."}
+
+
+@router.post("/train/all", summary="Train all models sequentially")
+def train_all_models(
+    background_tasks: BackgroundTasks,
+    response: Response,
+) -> dict:
+    """
+    Kick off sequential training for all model artifacts in one call.
+
+    Returns **202 Accepted** immediately; training runs in the background.
+    Poll ``GET /ai/models/status`` to track readiness across all models.
+    """
+    background_tasks.add_task(_run_train_all_bg)
+    response.status_code = 202
+    return {
+        "status": "accepted",
+        "message": (
+            "All-model training started in background. "
+            "Poll /ai/models/status for completion."
+        ),
+        "models": [
+            "playstyle_kmeans",
+            "win_predictor",
+            "matchup_predictor",
+            "kda_regressor",
+            "cs_regressor",
+            "earlygame_predictor",
+            "champion_clusters",
+        ],
+    }
+
+
+def _run_kda_training_bg() -> None:
+    """Background worker — opens its own DB session so the request session
+    can be closed immediately after the 202 is returned."""
+    db = SessionLocal()
     try:
-        return train_matchup_predictor(db)
-    except InsufficientDataError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        result = train_kda_regressor(db)
+        logger.info("KDA regression training complete: %s", result)
+    except Exception:
+        logger.exception("KDA regression background training failed")
+    finally:
+        db.close()
+
+
+def _run_cs_training_bg() -> None:
+    """Background worker — opens its own DB session so the request session
+    can be closed immediately after the 202 is returned."""
+    db = SessionLocal()
+    try:
+        result = train_cs_regressor(db)
+        logger.info("CS regression training complete: %s", result)
+    except Exception:
+        logger.exception("CS regression background training failed")
+    finally:
+        db.close()
 
 
 @router.post("/train/kda-regression", summary="Train KDA regression model")
-def train_kda_regression(db: Session = Depends(get_db)) -> dict:
+def train_kda_regression(
+    background_tasks: BackgroundTasks,
+    response: Response,
+) -> dict:
     """
-    Train the KDA regression model (Ridge vs XGBRegressor).
-    The better model by R² is saved to ``kda_regressor.joblib``.
+    Train the KDA regression model (Ridge vs XGBRegressor) asynchronously.
+
+    Returns **202 Accepted** immediately; training runs in the background.
+    Poll ``GET /ai/models/status`` to check when ``kda_regressor`` is ready.
 
     Features are rolling prior-game stats only; current-game outcomes
     (kills, deaths, assists) are never included to prevent target leakage.
-
-    Raises 422 when fewer than 100 labeled training rows exist.
     """
-    try:
-        return train_kda_regressor(db)
-    except InsufficientDataError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    background_tasks.add_task(_run_kda_training_bg)
+    response.status_code = 202
+    return {"status": "accepted", "message": "KDA regression training started in background. Poll /ai/models/status for completion."}
 
 
 @router.post("/train/cs-regression", summary="Train CS/min regression model")
-def train_cs_regression(db: Session = Depends(get_db)) -> dict:
+def train_cs_regression(
+    background_tasks: BackgroundTasks,
+    response: Response,
+) -> dict:
     """
-    Train the CS/min regression model (Ridge vs XGBRegressor).
-    The better model by R² is saved to ``cs_regressor.joblib``.
+    Train the CS/min regression model (Ridge vs XGBRegressor) asynchronously.
+
+    Returns **202 Accepted** immediately; training runs in the background.
+    Poll ``GET /ai/models/status`` to check when ``cs_regressor`` is ready.
 
     Identical pipeline to KDA regression with a separate scaler,
     separate artifact, and separate output files.
-
-    Raises 422 when fewer than 100 labeled training rows exist.
     """
-    try:
-        return train_cs_regressor(db)
-    except InsufficientDataError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    background_tasks.add_task(_run_cs_training_bg)
+    response.status_code = 202
+    return {"status": "accepted", "message": "CS regression training started in background. Poll /ai/models/status for completion."}
 
 
 @router.post("/train/early-game", summary="Train early-game win-prediction model")
-def train_early_game(db: Session = Depends(get_db)) -> dict:
+def train_early_game(
+    background_tasks: BackgroundTasks,
+    response: Response,
+) -> dict:
     """
     Train the early-game predictor (Logistic Regression) on T=10 and T=15 minute
-    timeline differentials.  The model predicts team 100's win probability from
-    gold/XP/level/CS diffs and first-objective flags.
+    timeline differentials.
 
-    Requires matches to have been ingested with ``fetch_timeline=true``.
-
-    Raises 422 when fewer than 50 matches with timeline frame data exist.
-    Raises 503 on any unexpected training error.
+    Returns **202 Accepted** immediately; training runs in the background.
+    Poll ``GET /ai/models/status`` to check when ``early_game`` is ready.
     """
-    try:
-        return train_earlygame_model(db)
-    except InsufficientDataError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("Unexpected error training early-game model")
-        raise HTTPException(
-            status_code=503,
-            detail=f"Early-game model training failed: {exc}",
-        ) from exc
+    background_tasks.add_task(_run_earlygame_training_bg)
+    response.status_code = 202
+    return {"status": "accepted", "message": "Early-game training started in background. Poll /ai/models/status for completion."}
 
 
 # ---------------------------------------------------------------------------
@@ -618,7 +762,10 @@ def enrich_opponent_features(
 
 
 @router.post("/train/champion-clusters", summary="Train champion archetype clustering model")
-def train_champion_clusters_endpoint(db: Session = Depends(get_db)) -> dict:
+def train_champion_clusters_endpoint(
+    background_tasks: BackgroundTasks,
+    response: Response,
+) -> dict:
     """
     Cluster all champions in tracked matches by their aggregate stat profiles
     (KDA, CS/min, gold/min, damage share, vision, kill participation).
@@ -629,11 +776,6 @@ def train_champion_clusters_endpoint(db: Session = Depends(get_db)) -> dict:
     Requires at least 8 distinct champions with 3+ games each.
     Run after ingesting a representative set of matches.
     """
-    from app.services.ai_service import train_champion_clusters, InsufficientDataError
-    try:
-        return train_champion_clusters(db)
-    except InsufficientDataError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        logger.exception("champion-clusters training error")
-        raise HTTPException(status_code=500, detail=str(e))
+    background_tasks.add_task(_run_champion_clusters_bg)
+    response.status_code = 202
+    return {"status": "accepted", "message": "Champion-clusters training started in background. Poll /ai/models/status for completion."}
