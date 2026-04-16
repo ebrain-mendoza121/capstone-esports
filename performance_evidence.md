@@ -1,6 +1,6 @@
 # Performance Evidence — SMART Goal Verification
 
-**Measured:** 2026-04-15 23:18:51  
+**Measured:** 2026-04-13 11:03:15  
 **Backend:** http://localhost:8000  
 **Script:** benchmark.sh (curl -w %{time_total})
 
@@ -10,9 +10,9 @@
 
 | Field | Measured Value | Goal | Pass? |
 |---|---|---|---|
-| Total participant-match rows | 36880 | — | — |
-| Rows with derived metrics | 36700 | — | — |
-| **Coverage %** | **99.51%** | **≥ 95 %** | **True** |
+| Total participant-match rows | 36100 | — | — |
+| Rows with derived metrics | 36100 | — | — |
+| **Coverage %** | **100.0%** | **≥ 95 %** | **True** |
 
 > Source: `GET /backfill/status`  
 > The backend computes six KPIs (KDA, CS/min, Gold/min, Kill Participation,  
@@ -28,10 +28,10 @@
 |---|---|---|---|---|
 | `GET /` | 200 | 1 ms | < 2000 ms | ✅ |
 | `GET /health` | 200 | 1 ms | < 2000 ms | ✅ |
-| `GET /players/?limit=100` | 200 | 1116 ms | < 2000 ms | ✅ |
-| `GET /analytics/bans/most-banned` | 200 | 940 ms | < 2000 ms | ✅ |
-| `GET /metrics/player/{puuid}` | 200 | 1150 ms | < 2000 ms | ✅ |
-| `GET /backfill/status` | 200 | 965 ms | < 2000 ms | ✅ |
+| `GET /players/` | 200 | 922 ms | < 2000 ms | ✅ |
+| `GET /analytics/bans/most-banned` | 200 | 641 ms | < 2000 ms | ✅ |
+| `GET /metrics/player/{puuid}` | 200 | 616 ms | < 2000 ms | ✅ |
+| `GET /backfill/status` | 200 | 623 ms | < 2000 ms | ✅ |
 
 > Times measured with `curl -sf -o /dev/null -w "%{time_total}"` (wall-clock, single request, loopback).  
 > The metric computation goal (< 1 s) is verified by the `GET /metrics/player/{puuid}` row above —  
@@ -43,11 +43,10 @@
 
 | Metric | Value | Goal | Pass? |
 |---|---|---|---|
-| **Players in DB** | **14275** | **≥ 5** | ✅ |
+| **Players in DB** | **14205** | **≥ 5** | ✅ |
 | First PUUID sampled | `GXO6oaJPECfKU3Zr_5CAiUCEpGNGVq5zRrmXWbfoih49CX5D4_bw360rWA9skKW5Qf5PblEY7MNdtA` | — | — |
 
-> Source: `GET /players/count` — single SQL `COUNT(*)` query; avoids loading all rows.
-> Full list available via `GET /players/` (supports `?limit` and `?min_matches` filters).
+> Source: `GET /players/` — returns every player row in the `players` table.
 
 ---
 
@@ -55,7 +54,7 @@
 
 | Metric | Value | Goal |
 |---|---|---|
-| Participant-match rows stored | 36880 | ≥ 10,000 rows supported |
+| Participant-match rows stored | 36100 | ≥ 10,000 rows supported |
 
 > `total_matches` from `GET /backfill/status` counts rows in `participant_stats`,  
 > which has a 1:1 relationship with ingested match-participants.  
@@ -69,7 +68,7 @@
 ## Raw backfill/status JSON
 
 ```json
-{"total_matches":36880,"with_derived_metrics":36700,"missing_derived_metrics":180,"coverage_percentage":99.51,"meets_95_percent_goal":true}
+{"total_matches":36100,"with_derived_metrics":36100,"missing_derived_metrics":0,"coverage_percentage":100.0,"meets_95_percent_goal":true}
 ```
 
 ---

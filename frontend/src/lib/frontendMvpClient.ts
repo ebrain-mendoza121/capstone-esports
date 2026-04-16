@@ -1,3 +1,15 @@
+function normalizeApiBaseUrl(raw: string | undefined): string {
+  const value = (raw ?? "").trim().replace(/\/$/, "");
+  if (!value) return "";
+
+  if (typeof window !== "undefined" && window.location.protocol === "https:" && value.startsWith("http://")) {
+    return `https://${value.slice("http://".length)}`;
+  }
+  return value;
+}
+
+const _API = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
+
 export type QueueCode = 420 | 440;
 export type RoleCode = "TOP" | "JUNGLE" | "MID" | "BOT" | "SUPPORT";
 
@@ -540,7 +552,7 @@ function makePuuid(seedText: string): string {
 }
 
 async function getPuuidFromRiotId(riotId: string, tagLine: string){
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/players/`);
+  const res = await fetch(`${_API}/players/`);
   if (!res.ok) {
     throw new Error("Failed to fetch player list from Riot API");
   }
@@ -561,7 +573,7 @@ function makeRiotId(seed: string): string {
 }
 
 async function resolvePlayer(puuid: string){
-  const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/players/${puuid}/`);
+  const res = await fetch(`${_API}/players/${puuid}/`);
     if (!res.ok) {
       if (res.status === 404) {
         throw new MockApiError(
@@ -596,7 +608,7 @@ async function resolvePlayer(puuid: string){
 
 const frontendMvpClient: FrontendMvpClient = {
   async listPlayers(minMatches = 10) {
-    const url = `${process.env.NEXT_PUBLIC_API_URL}/players/?min_matches=${minMatches}`;
+    const url = `${_API}/players/?min_matches=${minMatches}`;
     const res = await fetch(url);
     if (!res.ok) {
       throw new Error("Failed to fetch player list from Riot API");
@@ -606,7 +618,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async ingestPlayer(payload) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ingest/player`, {
+    const res = await fetch(`${_API}/ingest/player`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -653,7 +665,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getPlayerMetrics(puuid) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/metrics/player/${puuid}/`);
+    const res = await fetch(`${_API}/metrics/player/${puuid}/`);
     if (!res.ok) {
       throw new Error("Failed to fetch player metrics from Riot API");
     }
@@ -672,7 +684,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getPlayerRunes(puuid, limit) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/runes/?limit=${limit}`);
+    const res = await fetch(`${_API}/analytics/player/${puuid}/runes/?limit=${limit}`);
     if (!res.ok) {      throw new Error("Failed to fetch player rune history from Riot API");
     }
     const runes = await res.json();
@@ -681,13 +693,13 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getPlayerRolePerformance(puuid) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/role-performance`);
+    const res = await fetch(`${_API}/analytics/player/${puuid}/role-performance`);
     if (!res.ok) throw new Error("Failed to fetch role performance");
     return res.json() as Promise<PlayerRolePerformance>;
   },
 
   async getPlayerPlaystyle(puuid) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/playstyle/${puuid}`);
+    const res = await fetch(`${_API}/ai/playstyle/${puuid}`);
     // 503 = model not trained yet — return null instead of throwing
     if (res.status === 503) return null;
     if (!res.ok) throw new Error("Failed to fetch playstyle");
@@ -695,13 +707,13 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getChampionRecommendations(puuid, topN = 10) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/champions/${puuid}?top_n=${topN}`);
+    const res = await fetch(`${_API}/ai/champions/${puuid}?top_n=${topN}`);
     if (!res.ok) throw new Error("Failed to fetch champion recommendations");
     return res.json() as Promise<ChampionRecommendation[]>;
   },
 
   async getMatchesByPlayer(puuid, limit) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/matches/player/${puuid}/?limit=${limit}`);
+    const res = await fetch(`${_API}/matches/player/${puuid}/?limit=${limit}`);
     if (!res.ok) {
       throw new Error("Failed to fetch player match history from Riot API");
     }
@@ -711,25 +723,25 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getWinPrediction(puuid, matchId) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/predict/${puuid}/${matchId}`);
+    const res = await fetch(`${_API}/ai/predict/${puuid}/${matchId}`);
     if (!res.ok) throw new Error("Failed to fetch win prediction");
     return res.json() as Promise<WinPrediction>;
   },
 
   async getKdaPrediction(puuid, matchId) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/predict/kda/${puuid}/${matchId}`);
+    const res = await fetch(`${_API}/ai/predict/kda/${puuid}/${matchId}`);
     if (!res.ok) throw new Error("Failed to fetch KDA prediction");
     return res.json() as Promise<KdaPrediction>;
   },
 
   async getCsPrediction(puuid, matchId) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/predict/cs/${puuid}/${matchId}`);
+    const res = await fetch(`${_API}/ai/predict/cs/${puuid}/${matchId}`);
     if (!res.ok) throw new Error("Failed to fetch CS prediction");
     return res.json() as Promise<CsPrediction>;
   },
 
   async getMatch(matchId) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/matches/${matchId}/`);
+    const res = await fetch(`${_API}/matches/${matchId}/`);
     if (!res.ok) {
       throw new Error("Failed to fetch match details from Riot API");
     }
@@ -738,7 +750,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getMatchDraft(matchId) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/matches/${matchId}/draft/`);
+    const res = await fetch(`${_API}/matches/${matchId}/draft/`);
     if (!res.ok) {
       throw new Error("Failed to fetch match draft data from Riot API");
     }
@@ -760,31 +772,31 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getEarlyGamePrediction(matchId) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/early-game/${matchId}`);
+    const res = await fetch(`${_API}/ai/early-game/${matchId}`);
     if (!res.ok) throw new Error("Failed to fetch early game prediction");
     return res.json() as Promise<EarlyGamePrediction>;
   },
 
   async getModelsStatus() {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/models/status`);
+    const res = await fetch(`${_API}/ai/models/status`);
     if (!res.ok) throw new Error("Failed to fetch models status");
     return res.json() as Promise<ModelsStatus>;
   },
 
   async getThreatWeights() {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/threat-weights`);
+    const res = await fetch(`${_API}/ai/threat-weights`);
     if (!res.ok) throw new Error("Failed to fetch threat weights");
     return res.json() as Promise<ThreatWeights>;
   },
 
   async getWinPredictionBacktest(nMatches = 50) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/ai/backtest/win-prediction?n_matches=${nMatches}`);
+    const res = await fetch(`${_API}/ai/backtest/win-prediction?n_matches=${nMatches}`);
     if (!res.ok) throw new Error("Failed to fetch win-prediction backtest");
     return res.json() as Promise<WinPredictionBacktest>;
   },
 
   async getPlayerBanAnalytics(puuid, limit) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/bans/?limit=${limit}`);
+    const res = await fetch(`${_API}/analytics/player/${puuid}/bans/?limit=${limit}`);
     if (!res.ok) {
       throw new Error("Failed to fetch player ban analytics from Riot API");
     }
@@ -819,7 +831,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getGlobalMostBanned(limit) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/bans/most-banned?limit=${limit}`);
+    const res = await fetch(`${_API}/analytics/bans/most-banned?limit=${limit}`);
     if (!res.ok) {
       throw new Error("Failed to fetch global ban data from Riot API");
     }
@@ -828,7 +840,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getChampionBanRate(championId) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/champion/${championId}/ban-rate/`);
+    const res = await fetch(`${_API}/analytics/champion/${championId}/ban-rate/`);
     if (!res.ok) {
       throw new Error("Failed to fetch champion ban rate from Riot API");
     }
@@ -837,7 +849,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getRunesMap() {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/runes/map/`);
+    const res = await fetch(`${_API}/analytics/runes/map/`);
     if (!res.ok) {
       throw new Error("Failed to fetch runes map from Riot API");
     }
@@ -846,7 +858,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getPlayerRuneHistory(puuid, limit) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/runes/?limit=${limit}`);
+    const res = await fetch(`${_API}/analytics/player/${puuid}/runes/?limit=${limit}`);
     if (!res.ok) {
       throw new Error("Failed to fetch player rune history from Riot API");
     }
@@ -855,7 +867,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getTimelineAvailability(matchId) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/`);
+    const res = await fetch(`${_API}/timeline/${matchId}/`);
     if (!res.ok) {
       if (res.status === 404) {
         throw new MockApiError(
@@ -872,7 +884,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getTimelineFramesByPuuid(matchId, puuid) {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/frames/by-puuid/${puuid}/`);
+    const res = await fetch(`${_API}/timeline/${matchId}/frames/by-puuid/${puuid}/`);
     if (!res.ok) {
       throw new Error("Failed to fetch timeline frames from Riot API");
     }
@@ -901,7 +913,7 @@ const frontendMvpClient: FrontendMvpClient = {
 
 async getPlayerTrends(puuid, window = 20) {
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/trends?window=${window}`
+      `${_API}/analytics/player/${puuid}/trends?window=${window}`
     );
     if (!res.ok) {
       throw new Error(`Failed to fetch trends (${res.status})`);
@@ -911,7 +923,7 @@ async getPlayerTrends(puuid, window = 20) {
 
   async getPlayerChampionStats(puuid, minGames = 1) {
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/champion-stats?min_games=${minGames}`
+      `${_API}/analytics/player/${puuid}/champion-stats?min_games=${minGames}`
     );
     if (!res.ok) throw new Error(`Failed to fetch champion stats (${res.status})`);
     return res.json() as Promise<PlayerChampionStats>;
@@ -919,7 +931,7 @@ async getPlayerTrends(puuid, window = 20) {
 
   async getObjectiveControl(puuid) {
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/analytics/player/${puuid}/objective-control`
+      `${_API}/analytics/player/${puuid}/objective-control`
     );
     if (!res.ok) throw new Error(`Failed to fetch objective control (${res.status})`);
     return res.json() as Promise<ObjectiveControl>;
@@ -927,7 +939,7 @@ async getPlayerTrends(puuid, window = 20) {
 
   async getTimelineFramesAll(matchId, limit = 1000) {
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/frames?limit=${limit}`
+      `${_API}/timeline/${matchId}/frames?limit=${limit}`
     );
     if (!res.ok) throw new Error(`Failed to fetch timeline frames (${res.status})`);
     return res.json() as Promise<TimelineFrameRaw[]>;
@@ -935,7 +947,7 @@ async getPlayerTrends(puuid, window = 20) {
 
   async getTimelineEvents(matchId, limit, cursor) {
   const url =
-    `${process.env.NEXT_PUBLIC_API_URL}/timeline/${matchId}/events/?limit=${limit}` +
+    `${_API}/timeline/${matchId}/events/?limit=${limit}` +
     (cursor ? `&cursor=${cursor}` : "");
 
   const res = await fetch(url);
