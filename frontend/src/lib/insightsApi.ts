@@ -171,9 +171,7 @@ export interface InsightResponse {
   generatedAt: string;
 }
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ||
-  "https://capstone-esports-production.up.railway.app";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export async function postJson<TResponse, TPayload>(path: string, payload: TPayload): Promise<TResponse> {
   const response = await fetch(`${API_BASE_URL}${path}`, {

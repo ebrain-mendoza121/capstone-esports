@@ -1,8 +1,4 @@
-// API base — falls back to hardcoded production URL so it works even when
-// NEXT_PUBLIC_API_URL is undefined in the build environment.
-const _API =
-  process.env.NEXT_PUBLIC_API_URL ||
-  "https://capstone-esports-production.up.railway.app";
+const _API = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export type QueueCode = 420 | 440;
 export type RoleCode = "TOP" | "JUNGLE" | "MID" | "BOT" | "SUPPORT";
