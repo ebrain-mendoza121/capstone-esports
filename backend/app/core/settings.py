@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     )
 
     database_url: str
-    cors_origins: Annotated[List[str], NoDecode] = ["http://localhost:3000"]
+    cors_origins: Annotated[List[str], NoDecode] = ["https://capstone-esports-production-6e32.up.railway.app/"]
     riot_api_key: str = ""
 
     # Request behavior
