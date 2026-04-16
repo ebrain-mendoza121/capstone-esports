@@ -58,6 +58,23 @@ export interface TeamPlayerResult {
   avg_kill_part_20: number | null;
   avg_vision_per_min_20: number | null;
   error: string | null;
+  // Playstyle fields (null when model not trained or player has insufficient data)
+  playstyle_label: string | null;
+  playstyle_recommended_roles: string[];
+  role_mismatch: boolean;
+  // Champion recommendations (populated when no champion was selected by the caller)
+  recommended_champions: ChampionRecommendationSlim[];
+}
+
+export interface ChampionRecommendationSlim {
+  champion_id: number | null;
+  champion_name: string;
+  role: string | null;
+  score: number;
+  games_played: number;
+  win_rate: number;
+  smoothed_win_rate: number;
+  playstyle_match: boolean;
 }
 
 export interface TeamAggStats {
@@ -100,6 +117,7 @@ export interface TeamBuildResponse {
   team_stats: TeamAggStats;
   strengths: string[];
   gaps: string[];
+  playstyle_warnings: string[];
   composition_archetype: string;
   synergy_flags: string[];
   team_dna: TeamDna | null;
@@ -127,12 +145,27 @@ export interface RoleMatchup {
   cs_per_min: EdgeStats;
 }
 
+export interface ChampionMatchupFlag {
+  type: "favorable_for_blue" | "unfavorable_for_blue";
+  blue_champion_id: number | null;
+  blue_champion_name: string | null;
+  red_champion_id: number | null;
+  red_champion_name: string | null;
+  role: string | null;
+  blue_win_rate: number;
+  confidence: string;
+  games_played: number;
+  source: string;
+  message: string;
+}
+
 export interface TeamMatchupResponse {
   platform: string;
   blue_win_probability: number;
   red_win_probability: number;
   prediction_method: string;
   role_matchups: RoleMatchup[];
+  champion_matchup_flags: ChampionMatchupFlag[];
   lane_edges: {
     blue_lanes_winning: number;
     red_lanes_winning: number;

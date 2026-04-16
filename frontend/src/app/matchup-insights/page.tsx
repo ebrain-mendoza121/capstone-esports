@@ -12,6 +12,7 @@ import {
   RoleMatchup,
   TeamMatchupResponse,
   TeamPlayerResult,
+  ChampionMatchupFlag,
   requestMatchupInsights,
 } from "@/lib/insightsApi";
 import useChampionOptions from "@/lib/useChampionOptions";
@@ -57,6 +58,226 @@ function RoleMatchupRow({ m }: { m: RoleMatchup }) {
   );
 }
 
+function RoleFitBadge({ fit }: { fit: string }) {
+  if (fit === "native")   return <span className={styles.badgeWin} style={{ fontSize: "0.72rem" }}>✓ native</span>;
+  if (fit === "flex")     return <span className={styles.badge}    style={{ fontSize: "0.72rem" }}>~ flex</span>;
+  if (fit === "off-meta") return <span className={styles.badgeLoss} style={{ fontSize: "0.72rem" }}>⚠ off-meta</span>;
+  return null;
+}
+
+/** Compact rec card shown below the table for players who didn't pick a champion */
+function MiniRecCard({ player, side }: { player: TeamPlayerResult; side: "blue" | "red" }) {
+  const borderColor = side === "blue" ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)";
+  const fitBadge    = side === "blue" ? styles.badgeWin : styles.badgeLoss;
+  return (
+    <article
+      className={styles.dataCard}
+      style={{ border: `1px solid ${borderColor}`, display: "flex", flexDirection: "column", gap: 8 }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>{player.summoner_name}</span>
+        <span className={styles.badgeNeutral} style={{ fontSize: "0.68rem" }}>
+          {player.declared_role ?? player.primary_role ?? "?"}
+        </span>
+      </div>
+      {(player.recommended_champions ?? []).map((r, i) => (
+        <div
+          key={i}
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "4px 8px",
+            background: "rgba(255,255,255,0.04)",
+            borderRadius: 4,
+          }}
+        >
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <strong style={{ fontSize: "0.82rem" }}>{r.champion_name}</strong>
+            {r.playstyle_match && (
+              <span className={fitBadge} style={{ fontSize: "0.65rem" }}>✓ fits playstyle</span>
+            )}
+          </div>
+          <span style={{ fontSize: "0.7rem", opacity: 0.7 }}>
+            {(r.smoothed_win_rate * 100).toFixed(1)}% · {r.games_played}g
+          </span>
+        </div>
+      ))}
+    </article>
+  );
+}
+
+/** Lane-by-lane champion comparison table */
+function ChampionPicksMatchup({
+  bluePlayers,
+  redPlayers,
+}: {
+  bluePlayers: TeamPlayerResult[];
+  redPlayers: TeamPlayerResult[];
+}) {
+  const playersWithoutChampion = [
+    ...bluePlayers.filter((p) => !p.champion_meta && (p.recommended_champions ?? []).length > 0).map((p) => ({ p, side: "blue" as const })),
+    ...redPlayers.filter((p) => !p.champion_meta && (p.recommended_champions ?? []).length > 0).map((p) => ({ p, side: "red" as const })),
+  ];
+
+  return (
+    <section className={styles.sectionCard}>
+      <h2 className={styles.sectionTitle}>Champion Picks</h2>
+
+      {/* Lane-by-lane table */}
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th style={{ color: "var(--color-win, #22c55e)", textAlign: "left" }}>Blue</th>
+              <th>Role</th>
+              <th>Champion</th>
+              <th>Type</th>
+              <th>Fit</th>
+              <th style={{ width: 32, textAlign: "center" }}></th>
+              <th style={{ color: "var(--color-loss, #ef4444)", textAlign: "right" }}>Red</th>
+              <th style={{ textAlign: "right" }}>Role</th>
+              <th style={{ textAlign: "right" }}>Champion</th>
+              <th style={{ textAlign: "right" }}>Type</th>
+              <th style={{ textAlign: "right" }}>Fit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bluePlayers.map((blue, i) => {
+              const red = redPlayers[i];
+              if (!red) return null;
+              const blueChamp = blue.champion_meta;
+              const redChamp  = red.champion_meta;
+              const blueRec   = (blue.recommended_champions ?? [])[0];
+              const redRec    = (red.recommended_champions ?? [])[0];
+              return (
+                <tr key={i}>
+                  {/* Blue side */}
+                  <td style={{ fontWeight: 600 }}>{blue.summoner_name ?? "—"}</td>
+                  <td>
+                    <span className={styles.badgeNeutral} style={{ fontSize: "0.72rem" }}>
+                      {blue.declared_role ?? blue.primary_role ?? "—"}
+                    </span>
+                  </td>
+                  <td>
+                    {blueChamp ? (
+                      <strong>{blueChamp.name}</strong>
+                    ) : blueRec ? (
+                      <span style={{ opacity: 0.6, fontStyle: "italic" }}>💡 {blueRec.champion_name}</span>
+                    ) : (
+                      <span className={styles.emptyState}>—</span>
+                    )}
+                  </td>
+                  <td>
+                    {blueChamp?.tags && blueChamp.tags.length > 0 ? (
+                      <span className={styles.badge} style={{ fontSize: "0.7rem" }}>
+                        {blueChamp.tags.join(" / ")}
+                      </span>
+                    ) : "—"}
+                  </td>
+                  <td><RoleFitBadge fit={blueChamp ? blue.role_champion_fit : "unknown"} /></td>
+
+                  {/* Divider */}
+                  <td style={{ textAlign: "center", fontWeight: 700, opacity: 0.4 }}>vs</td>
+
+                  {/* Red side (right-aligned) */}
+                  <td style={{ fontWeight: 600, textAlign: "right" }}>{red.summoner_name ?? "—"}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <span className={styles.badgeNeutral} style={{ fontSize: "0.72rem" }}>
+                      {red.declared_role ?? red.primary_role ?? "—"}
+                    </span>
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    {redChamp ? (
+                      <strong>{redChamp.name}</strong>
+                    ) : redRec ? (
+                      <span style={{ opacity: 0.6, fontStyle: "italic" }}>💡 {redRec.champion_name}</span>
+                    ) : (
+                      <span className={styles.emptyState}>—</span>
+                    )}
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    {redChamp?.tags && redChamp.tags.length > 0 ? (
+                      <span className={styles.badge} style={{ fontSize: "0.7rem" }}>
+                        {redChamp.tags.join(" / ")}
+                      </span>
+                    ) : "—"}
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    <RoleFitBadge fit={redChamp ? red.role_champion_fit : "unknown"} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* AI suggestions grid — only for players without a champion */}
+      {playersWithoutChampion.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <h3 style={{ fontSize: "0.82rem", fontWeight: 600, opacity: 0.7, marginBottom: 12 }}>
+            💡 AI Champion Suggestions (players without a pick)
+          </h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+            {playersWithoutChampion.map(({ p, side }, i) => (
+              <MiniRecCard key={i} player={p} side={side} />
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CounterFlagsSection({ flags }: { flags: ChampionMatchupFlag[] }) {
+  if (!flags || flags.length === 0) return null;
+  const favorable   = flags.filter((f) => f.type === "favorable_for_blue");
+  const unfavorable = flags.filter((f) => f.type === "unfavorable_for_blue");
+
+  return (
+    <section className={styles.sectionCard}>
+      <h2 className={styles.sectionTitle}>Champion Matchup Counter Intel</h2>
+      {favorable.length > 0 && (
+        <>
+          <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8, color: "var(--color-win, #22c55e)" }}>
+            ✓ Favorable for Blue
+          </h3>
+          <ul className={styles.bulletList} style={{ marginBottom: 16 }}>
+            {favorable.map((f, i) => (
+              <li key={i}>
+                <strong>{f.blue_champion_name}</strong> vs <strong>{f.red_champion_name}</strong>
+                {f.role ? ` (${f.role})` : ""} — Blue wins {(f.blue_win_rate * 100).toFixed(1)}%
+                <span className={styles.badge} style={{ marginLeft: 8, fontSize: "0.72rem" }}>
+                  {f.confidence} · {f.games_played} games
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {unfavorable.length > 0 && (
+        <>
+          <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8, color: "var(--color-loss, #ef4444)" }}>
+            ⚠ Unfavorable for Blue
+          </h3>
+          <ul className={styles.bulletList}>
+            {unfavorable.map((f, i) => (
+              <li key={i}>
+                <strong>{f.blue_champion_name}</strong> vs <strong>{f.red_champion_name}</strong>
+                {f.role ? ` (${f.role})` : ""} — Blue wins only {(f.blue_win_rate * 100).toFixed(1)}%
+                <span className={styles.badge} style={{ marginLeft: 8, fontSize: "0.72rem" }}>
+                  {f.confidence} · {f.games_played} games
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
 function MiniPlayerTable({ players }: { players: TeamPlayerResult[] }) {
   return (
     <div className={styles.tableWrap}>
@@ -95,6 +316,7 @@ function normalizePlayers(players: PlayerInsightInputForm[]): PlayerInsightInput
     gameName: p.gameName.trim(),
     tagLine: p.tagLine.trim(),
     role: p.role,
+    champion: p.champion.trim() || undefined,
   }));
   if (normalized.some((p) => !p.gameName || !p.tagLine || !p.role)) return null;
   return normalized.map((p) => ({ ...p, role: p.role as PlayerRoleCode }));
@@ -257,6 +479,15 @@ export default function MatchupInsightsPage() {
               </table>
             </div>
           </section>
+
+          {/* Champion Matchup Counter Intel */}
+          <CounterFlagsSection flags={result.champion_matchup_flags ?? []} />
+
+          {/* Champion Picks — lane-by-lane comparison table */}
+          <ChampionPicksMatchup
+            bluePlayers={result.blue_team.players}
+            redPlayers={result.red_team.players}
+          />
 
           <section className={styles.sectionCard}>
             <div className={styles.twoCol}>

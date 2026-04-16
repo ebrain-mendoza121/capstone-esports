@@ -11,6 +11,7 @@ import {
   PlayerRoleCode,
   TeamBuildResponse,
   TeamPlayerResult,
+  ChampionRecommendationSlim,
   requestTeamInsights,
 } from "@/lib/insightsApi";
 import useChampionOptions from "@/lib/useChampionOptions";
@@ -29,6 +30,25 @@ function ConfidenceBadge({ level }: { level: string }) {
   return <span className={cls}>{level}</span>;
 }
 
+const PLAYSTYLE_EMOJI: Record<string, string> = {
+  carry:           "🎯",
+  skirmisher:      "⚔️",
+  support_utility: "🛡️",
+  farm_efficiency: "🌾",
+};
+
+function PlaystyleBadge({ label }: { label: string | null }) {
+  if (!label || label === "unknown" || label === "insufficient_data") {
+    return <span className={styles.badge}>—</span>;
+  }
+  const emoji = PLAYSTYLE_EMOJI[label] ?? "🔮";
+  return (
+    <span className={styles.badgeNeutral} title={`Recommended: ${label}`}>
+      {emoji} {label}
+    </span>
+  );
+}
+
 function PlayerRow({ p }: { p: TeamPlayerResult }) {
   return (
     <tr>
@@ -36,8 +56,20 @@ function PlayerRow({ p }: { p: TeamPlayerResult }) {
         <strong>{p.summoner_name ?? "—"}</strong>
         {p.error ? <span className={styles.badgeLoss}> error</span> : null}
       </td>
-      <td>{p.declared_role ?? p.primary_role ?? "—"}</td>
+      <td>
+        {p.declared_role ?? p.primary_role ?? "—"}
+        {p.role_mismatch && p.playstyle_recommended_roles.length > 0 && (
+          <span
+            className={styles.badgeLoss}
+            style={{ marginLeft: 6, fontSize: "0.75em" }}
+            title={`Better fit: ${p.playstyle_recommended_roles.join(" / ")}`}
+          >
+            ⚠️ mismatch
+          </span>
+        )}
+      </td>
       <td>{p.champion_meta?.name ?? "—"}</td>
+      <td><PlaystyleBadge label={p.playstyle_label ?? null} /></td>
       <td>{p.games_in_window}</td>
       <td><ConfidenceBadge level={p.confidence} /></td>
       <td>{pct(p.win_rate_20)}</td>
@@ -46,6 +78,93 @@ function PlayerRow({ p }: { p: TeamPlayerResult }) {
       <td>{fmt(p.avg_kill_part_20)}</td>
       <td>{fmt(p.avg_vision_per_min_20)}</td>
     </tr>
+  );
+}
+
+function RoleFitBadge({ fit }: { fit: string }) {
+  if (fit === "native")   return <span className={styles.badgeWin}>✓ native</span>;
+  if (fit === "flex")     return <span className={styles.badge}>~ flex</span>;
+  if (fit === "off-meta") return <span className={styles.badgeLoss}>⚠ off-meta</span>;
+  return <span className={styles.badge}>—</span>;
+}
+
+function ChampionPickCard({ player }: { player: TeamPlayerResult }) {
+  const hasChampion = !!player.champion_meta;
+  const recs        = player.recommended_champions ?? [];
+
+  return (
+    <article className={styles.dataCard} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {/* Header row */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <strong style={{ fontSize: "0.9rem" }}>{player.summoner_name ?? "—"}</strong>
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          {player.primary_role && (
+            <span className={styles.badge} style={{ fontSize: "0.68rem" }}>
+              {player.primary_role}
+            </span>
+          )}
+          {player.playstyle_label && player.playstyle_label !== "insufficient_data" && (
+            <span className={styles.badgeNeutral} style={{ fontSize: "0.68rem" }}>
+              {player.playstyle_label}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Divider */}
+      <hr style={{ border: "none", borderTop: "1px solid rgba(255,255,255,0.07)", margin: 0 }} />
+
+      {/* Champion row */}
+      {hasChampion ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <strong style={{ fontSize: "0.92rem" }}>{player.champion_meta!.name}</strong>
+          <RoleFitBadge fit={player.role_champion_fit} />
+          {player.champion_meta!.tags.length > 0 && (
+            <span className={styles.badge} style={{ fontSize: "0.68rem" }}>
+              {player.champion_meta!.tags.join(" / ")}
+            </span>
+          )}
+        </div>
+      ) : (
+        <>
+          <p style={{ margin: 0, fontSize: "0.78rem", opacity: 0.5 }}>No champion selected</p>
+          {recs.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <p style={{ margin: 0, fontSize: "0.68rem", textTransform: "uppercase", opacity: 0.5 }}>
+                💡 AI Suggestions
+              </p>
+              {recs.map((r, i) => (
+                <div
+                  key={i}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "5px 8px",
+                    background: "rgba(255,255,255,0.04)",
+                    borderRadius: 5,
+                  }}
+                >
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <strong style={{ fontSize: "0.83rem" }}>{r.champion_name}</strong>
+                    {r.playstyle_match && (
+                      <span className={styles.badgeWin} style={{ fontSize: "0.65rem" }}>✓ playstyle</span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: "0.7rem", opacity: 0.7 }}>
+                    {(r.smoothed_win_rate * 100).toFixed(1)}% · {r.games_played}g
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className={styles.emptyState} style={{ margin: 0, fontSize: "0.75rem" }}>
+              No history — ingest more matches
+            </p>
+          )}
+        </>
+      )}
+    </article>
   );
 }
 
@@ -74,6 +193,7 @@ export default function TeamInsightsPage() {
       gameName: p.gameName.trim(),
       tagLine: p.tagLine.trim(),
       role: p.role,
+      champion: p.champion.trim() || undefined,
     }));
     if (normalized.some((p) => !p.gameName || !p.tagLine || !p.role)) return null;
     return normalized.map((p) => ({ ...p, role: p.role as PlayerRoleCode }));
@@ -173,6 +293,7 @@ export default function TeamInsightsPage() {
                     <th>Player</th>
                     <th>Role</th>
                     <th>Champion</th>
+                    <th>Playstyle</th>
                     <th>Games</th>
                     <th>Conf.</th>
                     <th>Win Rate</th>
@@ -247,6 +368,77 @@ export default function TeamInsightsPage() {
               </ul>
             </section>
           )}
+
+          {/* Playstyle Archetypes + Role Recommendations */}
+          <section className={styles.sectionCard}>
+            <h2 className={styles.sectionTitle}>Playstyle Archetypes</h2>
+
+            {/* Per-player role recommendations */}
+            <div className={styles.tableWrap}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>Player</th>
+                    <th>Declared Role</th>
+                    <th>Archetype</th>
+                    <th>Recommended Roles</th>
+                    <th>Fit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.players.map((p, i) => {
+                    const hasPlaystyle = p.playstyle_label && p.playstyle_label !== "insufficient_data";
+                    return (
+                      <tr key={i}>
+                        <td><strong>{p.summoner_name ?? "—"}</strong></td>
+                        <td>{p.declared_role ?? p.primary_role ?? "—"}</td>
+                        <td><PlaystyleBadge label={p.playstyle_label ?? null} /></td>
+                        <td>
+                          {hasPlaystyle && p.playstyle_recommended_roles.length > 0
+                            ? p.playstyle_recommended_roles.join(", ")
+                            : <span className={styles.emptyState}>No data</span>}
+                        </td>
+                        <td>
+                          {hasPlaystyle
+                            ? p.role_mismatch
+                              ? <span className={styles.badgeLoss}>⚠️ Mismatch</span>
+                              : <span className={styles.badgeWin}>✓ Aligned</span>
+                            : <span className={styles.badge}>—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Team-level playstyle warnings */}
+            {result.playstyle_warnings && result.playstyle_warnings.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <h3 style={{ marginBottom: 8, fontSize: "0.9rem", fontWeight: 600 }}>
+                  ⚠️ Composition Warnings
+                </h3>
+                <ul className={styles.bulletList}>
+                  {result.playstyle_warnings.map((w, i) => (
+                    <li key={i} className={styles.badgeLoss} style={{ padding: "6px 10px", marginBottom: 6, borderRadius: 6 }}>
+                      {w}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
+
+          {/* Champion Picks & Recommendations */}
+          <section className={styles.sectionCard}>
+            <h2 className={styles.sectionTitle}>Champion Picks</h2>
+            <p className={styles.sectionText} style={{ marginBottom: 16 }}>
+              Players without a selected champion receive AI-driven suggestions filtered to their declared role and playstyle.
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
+              {result.players.map((p, i) => <ChampionPickCard key={i} player={p} />)}
+            </div>
+          </section>
 
           {/* Threat scores */}
           {result.threat_scores.length > 0 && (

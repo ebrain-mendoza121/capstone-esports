@@ -19,7 +19,13 @@ from app.db.session import get_db
 from app.models.champion_matchups import ChampionMatchup
 from app.services.ddragon import get_champion_full_map
 from app.services.riot_live_service import get_team_stats, get_live_player_stats
-from app.services.ai_service import analyze_team_composition, role_matchup_breakdown, _load_model
+from app.services.ai_service import (
+    analyze_team_composition,
+    role_matchup_breakdown,
+    _load_model,
+    get_player_playstyle,
+    get_champion_recommendations,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +64,22 @@ class MatchupRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 _ROLE_ORDER = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"]
+
+# Maps playstyle archetype → roles where the player naturally excels
+_PLAYSTYLE_ROLE_AFFINITY: dict[str, list[str]] = {
+    "carry":           ["BOTTOM", "MIDDLE"],
+    "skirmisher":      ["JUNGLE", "TOP"],
+    "support_utility": ["UTILITY", "SUPPORT"],
+    "farm_efficiency": ["BOTTOM", "MIDDLE", "TOP"],
+}
+
+# Human-readable role suggestion per archetype
+_PLAYSTYLE_ROLE_HINT: dict[str, str] = {
+    "carry":           "BOTTOM or MIDDLE (damage carry)",
+    "skirmisher":      "JUNGLE or TOP (skirmish/engage)",
+    "support_utility": "SUPPORT or UTILITY (peel/engage)",
+    "farm_efficiency": "BOTTOM, MIDDLE, or TOP (farm-heavy lane)",
+}
 
 # Maps playstyle archetype → damage/engage profile
 _PLAYSTYLE_PROFILE: dict[str, dict] = {
@@ -136,6 +158,142 @@ def _team_strengths(player_stats: list[dict]) -> list[str]:
         strengths.append("Full role coverage — balanced composition")
 
     return strengths
+
+
+def _playstyle_warnings(player_playstyles: list[dict]) -> list[str]:
+    """
+    Generate team-level playstyle composition warnings.
+
+    player_playstyles: list of dicts, each with 'playstyle_label' and 'summoner_name'.
+    Returns a list of human-readable warning strings.
+    """
+    warnings: list[str] = []
+    from collections import Counter
+    label_counts: Counter = Counter(
+        p["playstyle_label"] for p in player_playstyles
+        if p.get("playstyle_label") and p["playstyle_label"] not in ("unknown", "insufficient_data")
+    )
+
+    # Too many of one archetype
+    for label, count in label_counts.items():
+        if count >= 3:
+            names = [
+                p.get("summoner_name", "?")
+                for p in player_playstyles
+                if p.get("playstyle_label") == label
+            ]
+            hint = _PLAYSTYLE_ROLE_HINT.get(label, label)
+            warnings.append(
+                f"{count} players classified as '{label}' ({', '.join(names)}) — "
+                f"all naturally suited to {hint}. Consider redistributing roles."
+            )
+        elif count == 2 and label == "carry":
+            names = [
+                p.get("summoner_name", "?")
+                for p in player_playstyles
+                if p.get("playstyle_label") == label
+            ]
+            warnings.append(
+                f"2 carry-archetype players ({', '.join(names)}) — "
+                f"confirm only one takes BOTTOM/MID to avoid resource contention."
+            )
+
+    # No utility/engage archetype
+    if label_counts.get("support_utility", 0) == 0 and sum(label_counts.values()) >= 3:
+        warnings.append(
+            "No support-utility archetype on the team — vision, peel, and engage may be lacking."
+        )
+
+    return warnings
+
+
+# Normalize short role codes (frontend) → canonical affinity role names (backend)
+_ROLE_NORMALIZE: dict[str, str] = {
+    "MID":     "MIDDLE",
+    "MIDDLE":  "MIDDLE",
+    "BOT":     "BOTTOM",
+    "BOTTOM":  "BOTTOM",
+    "TOP":     "TOP",
+    "JUNGLE":  "JUNGLE",
+    "SUPPORT": "SUPPORT",
+    "UTILITY": "UTILITY",
+}
+
+
+def _fetch_player_playstyles(db, player_stats: list[dict]) -> list[dict]:
+    """
+    Fetch playstyle for every player who has a puuid tracked in the DB.
+    Returns a parallel list of playstyle dicts (safe — never raises).
+    """
+    results = []
+    for p in player_stats:
+        puuid = p.get("puuid")
+        if not puuid:
+            results.append({"playstyle_label": None, "playstyle_recommended_roles": [], "role_mismatch": False})
+            continue
+        try:
+            ps = get_player_playstyle(db, puuid)
+            label = ps.get("playstyle_label")
+            recommended = _PLAYSTYLE_ROLE_AFFINITY.get(label or "", [])
+            raw_role = str(p.get("declared_role") or p.get("primary_role") or "").upper()
+            declared = _ROLE_NORMALIZE.get(raw_role, raw_role)
+            mismatch = bool(declared and recommended and declared not in recommended)
+            results.append({
+                "playstyle_label":             label,
+                "playstyle_recommended_roles": recommended,
+                "role_mismatch":               mismatch,
+                "summoner_name":               p.get("summoner_name"),
+            })
+        except Exception:
+            results.append({"playstyle_label": None, "playstyle_recommended_roles": [], "role_mismatch": False})
+    return results
+
+
+def _fetch_champion_recs(
+    db,
+    player_stats: list[dict],
+    player_slots: list[dict],
+    top_n: int = 3,
+) -> list[list[dict]]:
+    """
+    Fetch top-N champion recommendations for each player.
+
+    Only fetches when a player has a puuid tracked in the DB AND no champion
+    was provided by the caller (champion_meta is None).  Players who already
+    picked a champion get an empty list — no recommendation needed.
+
+    Returns a parallel list of recommendation lists (safe — never raises).
+    """
+    results = []
+    for i, p in enumerate(player_stats):
+        puuid = p.get("puuid")
+        already_has_champion = player_slots[i].get("champion_meta") is not None
+        if not puuid or already_has_champion:
+            results.append([])
+            continue
+        try:
+            # Pass the player's declared/primary role as a filter hint so
+            # recommendations stay relevant to their lane.
+            raw_role = str(p.get("declared_role") or p.get("primary_role") or "").upper()
+            canonical = _ROLE_NORMALIZE.get(raw_role, raw_role)
+            recs = get_champion_recommendations(db, puuid, top_n=top_n, role_filter=canonical or None)
+            # Trim to safe subset of keys for the API response
+            results.append([
+                {
+                    "champion_id":       r.get("champion_id"),
+                    "champion_name":     r.get("champion_name"),
+                    "role":              r.get("role"),
+                    "score":             r.get("score"),
+                    "games_played":      r.get("games_played"),
+                    "win_rate":          r.get("win_rate"),
+                    "smoothed_win_rate": r.get("smoothed_win_rate"),
+                    "playstyle_match":   r.get("playstyle_match"),
+                }
+                for r in recs
+            ])
+        except Exception:
+            results.append([])
+    return results
 
 
 def _aggregate_team(player_stats: list[dict]) -> dict:
@@ -394,7 +552,14 @@ async def build_team(
     composition_archetype = _composition_archetype(player_slots)
     synergy_flags         = _synergy_flags(player_slots)
 
-    # Per-player summary with confidence label + champion enrichment
+    # Playstyle per player (silently skipped when model not trained)
+    player_playstyle_data = _fetch_player_playstyles(db, player_stats)
+    playstyle_warnings    = _playstyle_warnings(player_playstyle_data)
+
+    # Champion recommendations for players who didn't select a champion
+    player_champ_recs = _fetch_champion_recs(db, player_stats, player_slots)
+
+    # Per-player summary with confidence label + champion + playstyle enrichment
     players_out = []
     for i, p in enumerate(player_stats):
         games = int(p.get("games_in_window", 0))
@@ -404,24 +569,31 @@ async def build_team(
             "low"
         )
         slot = player_slots[i]
+        ps   = player_playstyle_data[i]
         players_out.append({
-            "summoner_name":         p.get("summoner_name"),
-            "puuid":                 p.get("puuid"),
-            "source":                p.get("source", "unknown"),
-            "primary_role":          p.get("primary_role"),
-            "declared_role":         p.get("declared_role"),
+            "summoner_name":               p.get("summoner_name"),
+            "puuid":                       p.get("puuid"),
+            "source":                      p.get("source", "unknown"),
+            "primary_role":                p.get("primary_role"),
+            "declared_role":               p.get("declared_role"),
             # Champion selection (null when not provided by caller)
-            "champion_meta":         slot["champion_meta"],
-            "role_champion_fit":     slot["role_champion_fit"],
-            "games_in_window":       games,
-            "confidence":            confidence,
-            "win_rate_20":           p.get("win_rate_20"),
-            "avg_kda_20":            p.get("avg_kda_20"),
-            "avg_cs_per_min_20":     p.get("avg_cs_per_min_20"),
-            "avg_gold_per_min_20":   p.get("avg_gold_per_min_20"),
-            "avg_kill_part_20":      p.get("avg_kill_part_20"),
-            "avg_vision_per_min_20": p.get("avg_vision_per_min_20"),
-            "error":                 p.get("error"),
+            "champion_meta":               slot["champion_meta"],
+            "role_champion_fit":           slot["role_champion_fit"],
+            "games_in_window":             games,
+            "confidence":                  confidence,
+            "win_rate_20":                 p.get("win_rate_20"),
+            "avg_kda_20":                  p.get("avg_kda_20"),
+            "avg_cs_per_min_20":           p.get("avg_cs_per_min_20"),
+            "avg_gold_per_min_20":         p.get("avg_gold_per_min_20"),
+            "avg_kill_part_20":            p.get("avg_kill_part_20"),
+            "avg_vision_per_min_20":       p.get("avg_vision_per_min_20"),
+            "error":                       p.get("error"),
+            # Playstyle enrichment
+            "playstyle_label":             ps.get("playstyle_label"),
+            "playstyle_recommended_roles": ps.get("playstyle_recommended_roles", []),
+            "role_mismatch":               ps.get("role_mismatch", False),
+            # Champion recommendations (populated when no champion was provided)
+            "recommended_champions":       player_champ_recs[i],
         })
 
     return {
@@ -431,6 +603,7 @@ async def build_team(
         "team_stats":           team_agg,
         "strengths":            strengths,
         "gaps":                 gaps,
+        "playstyle_warnings":   playstyle_warnings,
         # Composition analysis (populated when champion data is provided)
         "composition_archetype": composition_archetype,
         "synergy_flags":         synergy_flags,
@@ -567,34 +740,44 @@ async def predict_matchup(
 
     red_win_prob = round(1.0 - blue_win_prob, 4)
 
+    # --- Playstyle + champion recs for both teams ---
+    blue_playstyle_data = _fetch_player_playstyles(db, blue_stats)
+    red_playstyle_data  = _fetch_player_playstyles(db, red_stats)
+    blue_champ_recs     = _fetch_champion_recs(db, blue_stats, blue_slots)
+    red_champ_recs      = _fetch_champion_recs(db, red_stats,  red_slots)
+
     # --- Per-role matchup breakdown ---
-    def _player_row(pstat: dict, declared_role: Optional[str], slot: dict) -> dict:
+    def _player_row(pstat: dict, declared_role: Optional[str], slot: dict, ps: dict, champ_recs: list) -> dict:
         games = int(pstat.get("games_in_window", 0))
         return {
-            "summoner_name":         pstat.get("summoner_name"),
-            "puuid":                 pstat.get("puuid"),
-            "source":                pstat.get("source", "unknown"),
-            "primary_role":          pstat.get("primary_role"),
-            "declared_role":         declared_role,
-            "champion_meta":         slot["champion_meta"],
-            "role_champion_fit":     slot["role_champion_fit"],
-            "games_in_window":       games,
-            "confidence":            "high" if games >= 15 else "medium" if games >= 5 else "low",
-            "win_rate_20":           pstat.get("win_rate_20"),
-            "avg_kda_20":            pstat.get("avg_kda_20"),
-            "avg_cs_per_min_20":     pstat.get("avg_cs_per_min_20"),
-            "avg_gold_per_min_20":   pstat.get("avg_gold_per_min_20"),
-            "avg_kill_part_20":      pstat.get("avg_kill_part_20"),
-            "avg_vision_per_min_20": pstat.get("avg_vision_per_min_20"),
-            "error":                 pstat.get("error"),
+            "summoner_name":               pstat.get("summoner_name"),
+            "puuid":                       pstat.get("puuid"),
+            "source":                      pstat.get("source", "unknown"),
+            "primary_role":                pstat.get("primary_role"),
+            "declared_role":               declared_role,
+            "champion_meta":               slot["champion_meta"],
+            "role_champion_fit":           slot["role_champion_fit"],
+            "games_in_window":             games,
+            "confidence":                  "high" if games >= 15 else "medium" if games >= 5 else "low",
+            "win_rate_20":                 pstat.get("win_rate_20"),
+            "avg_kda_20":                  pstat.get("avg_kda_20"),
+            "avg_cs_per_min_20":           pstat.get("avg_cs_per_min_20"),
+            "avg_gold_per_min_20":         pstat.get("avg_gold_per_min_20"),
+            "avg_kill_part_20":            pstat.get("avg_kill_part_20"),
+            "avg_vision_per_min_20":       pstat.get("avg_vision_per_min_20"),
+            "error":                       pstat.get("error"),
+            "playstyle_label":             ps.get("playstyle_label"),
+            "playstyle_recommended_roles": ps.get("playstyle_recommended_roles", []),
+            "role_mismatch":               ps.get("role_mismatch", False),
+            "recommended_champions":       champ_recs,
         }
 
     blue_players_out = [
-        _player_row(s, body.blue_team[i].role, blue_slots[i])
+        _player_row(s, body.blue_team[i].role, blue_slots[i], blue_playstyle_data[i], blue_champ_recs[i])
         for i, s in enumerate(blue_stats)
     ]
     red_players_out = [
-        _player_row(s, body.red_team[i].role, red_slots[i])
+        _player_row(s, body.red_team[i].role, red_slots[i], red_playstyle_data[i], red_champ_recs[i])
         for i, s in enumerate(red_stats)
     ]
 
