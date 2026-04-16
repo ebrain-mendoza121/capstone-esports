@@ -171,7 +171,17 @@ export interface InsightResponse {
   generatedAt: string;
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+function normalizeApiBaseUrl(raw: string | undefined): string {
+  const value = (raw ?? "").trim().replace(/\/$/, "");
+  if (!value) return "";
+
+  if (typeof window !== "undefined" && window.location.protocol === "https:" && value.startsWith("http://")) {
+    return `https://${value.slice("http://".length)}`;
+  }
+  return value;
+}
+
+const API_BASE_URL = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
 
 export async function postJson<TResponse, TPayload>(path: string, payload: TPayload): Promise<TResponse> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
