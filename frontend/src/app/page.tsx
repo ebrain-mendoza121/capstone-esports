@@ -19,12 +19,12 @@ interface EndpointResult {
 }
 
 const PUUID_ENDPOINTS = [
-  { label: "Player Profile",      path: `/players/${QUICK_PUUID}/` },
-  { label: "Metrics",             path: `/metrics/player/${QUICK_PUUID}/` },
-  { label: "Match History (20)",  path: `/matches/player/${QUICK_PUUID}/?limit=20` },
+  { label: "Player Profile",      path: `/players/${QUICK_PUUID}` },
+  { label: "Metrics",             path: `/metrics/player/${QUICK_PUUID}` },
+  { label: "Match History (20)",  path: `/matches/player/${QUICK_PUUID}?limit=20` },
   { label: "Role Performance",    path: `/analytics/player/${QUICK_PUUID}/role-performance` },
   { label: "Objective Control",   path: `/analytics/player/${QUICK_PUUID}/objective-control` },
-  { label: "Ban Analytics",       path: `/analytics/player/${QUICK_PUUID}/bans/?limit=20` },
+  { label: "Ban Analytics",       path: `/analytics/player/${QUICK_PUUID}/bans?limit=20` },
   { label: "Playstyle (AI)",      path: `/ai/playstyle/${QUICK_PUUID}` },
   { label: "Champion Recs (AI)",  path: `/ai/champions/${QUICK_PUUID}?top_n=5` },
 ];

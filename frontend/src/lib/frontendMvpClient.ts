@@ -565,7 +565,7 @@ function makeRiotId(seed: string): string {
 }
 
 async function resolvePlayer(puuid: string){
-  const res = await fetch(`${_API}/players/${puuid}/`);
+  const res = await fetch(`${_API}/players/${puuid}`);
     if (!res.ok) {
       if (res.status === 404) {
         throw new MockApiError(
@@ -657,7 +657,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getPlayerMetrics(puuid) {
-    const res = await fetch(`${_API}/metrics/player/${puuid}/`);
+    const res = await fetch(`${_API}/metrics/player/${puuid}`);
     if (!res.ok) {
       throw new Error("Failed to fetch player metrics from Riot API");
     }
@@ -676,7 +676,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getPlayerRunes(puuid, limit) {
-    const res = await fetch(`${_API}/analytics/player/${puuid}/runes/?limit=${limit}`);
+    const res = await fetch(`${_API}/analytics/player/${puuid}/runes?limit=${limit}`);
     if (!res.ok) {      throw new Error("Failed to fetch player rune history from Riot API");
     }
     const runes = await res.json();
@@ -705,7 +705,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getMatchesByPlayer(puuid, limit) {
-    const res = await fetch(`${_API}/matches/player/${puuid}/?limit=${limit}`);
+    const res = await fetch(`${_API}/matches/player/${puuid}?limit=${limit}`);
     if (!res.ok) {
       throw new Error("Failed to fetch player match history from Riot API");
     }
@@ -733,7 +733,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getMatch(matchId) {
-    const res = await fetch(`${_API}/matches/${matchId}/`);
+    const res = await fetch(`${_API}/matches/${matchId}`);
     if (!res.ok) {
       throw new Error("Failed to fetch match details from Riot API");
     }
@@ -742,7 +742,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getMatchDraft(matchId) {
-    const res = await fetch(`${_API}/matches/${matchId}/draft/`);
+    const res = await fetch(`${_API}/matches/${matchId}/draft`);
     if (!res.ok) {
       throw new Error("Failed to fetch match draft data from Riot API");
     }
@@ -788,7 +788,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getPlayerBanAnalytics(puuid, limit) {
-    const res = await fetch(`${_API}/analytics/player/${puuid}/bans/?limit=${limit}`);
+    const res = await fetch(`${_API}/analytics/player/${puuid}/bans?limit=${limit}`);
     if (!res.ok) {
       throw new Error("Failed to fetch player ban analytics from Riot API");
     }
@@ -832,7 +832,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getChampionBanRate(championId) {
-    const res = await fetch(`${_API}/analytics/champion/${championId}/ban-rate/`);
+    const res = await fetch(`${_API}/analytics/champion/${championId}/ban-rate`);
     if (!res.ok) {
       throw new Error("Failed to fetch champion ban rate from Riot API");
     }
@@ -841,7 +841,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getRunesMap() {
-    const res = await fetch(`${_API}/analytics/runes/map/`);
+    const res = await fetch(`${_API}/analytics/runes/map`);
     if (!res.ok) {
       throw new Error("Failed to fetch runes map from Riot API");
     }
@@ -850,7 +850,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getPlayerRuneHistory(puuid, limit) {
-    const res = await fetch(`${_API}/analytics/player/${puuid}/runes/?limit=${limit}`);
+    const res = await fetch(`${_API}/analytics/player/${puuid}/runes?limit=${limit}`);
     if (!res.ok) {
       throw new Error("Failed to fetch player rune history from Riot API");
     }
@@ -859,7 +859,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getTimelineAvailability(matchId) {
-    const res = await fetch(`${_API}/timeline/${matchId}/`);
+    const res = await fetch(`${_API}/timeline/${matchId}`);
     if (!res.ok) {
       if (res.status === 404) {
         throw new MockApiError(
@@ -876,7 +876,7 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getTimelineFramesByPuuid(matchId, puuid) {
-    const res = await fetch(`${_API}/timeline/${matchId}/frames/by-puuid/${puuid}/`);
+    const res = await fetch(`${_API}/timeline/${matchId}/frames/by-puuid/${puuid}`);
     if (!res.ok) {
       throw new Error("Failed to fetch timeline frames from Riot API");
     }
@@ -939,7 +939,7 @@ async getPlayerTrends(puuid, window = 20) {
 
   async getTimelineEvents(matchId, limit, cursor) {
   const url =
-    `${_API}/timeline/${matchId}/events/?limit=${limit}` +
+    `${_API}/timeline/${matchId}/events?limit=${limit}` +
     (cursor ? `&cursor=${cursor}` : "");
 
   const res = await fetch(url);
