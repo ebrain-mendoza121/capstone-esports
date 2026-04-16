@@ -193,37 +193,66 @@ export default function IndividualStatsPage() {
         ) : null}
 
         {!loadingPlayers && players.length > 0 ? (
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th>Riot ID</th>
-                  <th>Tag</th>
-                  <th>Region</th>
-                  <th>Matches</th>
-                  <th>Open</th>
-                </tr>
-              </thead>
-              <tbody>
-                {players.map((player) => (
-                  <tr key={player.puuid}>
-                    <td>{player.riot_id}</td>
-                    <td>#{player.tag_line}</td>
-                    <td>{player.region}</td>
-                    <td>{player.match_count}</td>
-                    <td>
-                      <button
-                        className={styles.buttonSecondary}
-                        type="button"
-                        onClick={() => router.push(`/player/${player.puuid}`)}
-                      >
-                        Go to Dashboard
-                      </button>
-                    </td>
+          <div className={styles.playerResults}>
+            <div className={`${styles.tableWrap} ${styles.playerTableDesktop}`}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th>Riot ID</th>
+                    <th>Tag</th>
+                    <th>Region</th>
+                    <th>Matches</th>
+                    <th>Open</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {players.map((player) => (
+                    <tr key={player.puuid}>
+                      <td>{player.riot_id}</td>
+                      <td>#{player.tag_line}</td>
+                      <td>{player.region}</td>
+                      <td>{player.match_count}</td>
+                      <td>
+                        <button
+                          className={styles.buttonSecondary}
+                          type="button"
+                          onClick={() => router.push(`/player/${player.puuid}`)}
+                        >
+                          Go to Dashboard
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className={styles.playerCardsMobile}>
+              {players.map((player) => (
+                <article key={player.puuid} className={styles.playerCardMobile}>
+                  <div className={styles.playerCardMobileHeader}>
+                    <h3 className={styles.playerCardMobileTitle}>
+                      {player.riot_id}
+                      <span className={styles.playerCardMobileTag}>#{player.tag_line}</span>
+                    </h3>
+                    <span className={styles.playerCardMobileRegion}>{player.region}</span>
+                  </div>
+
+                  <p className={styles.playerCardMobileStats}>
+                    <span>Tracked Matches</span>
+                    <strong>{player.match_count}</strong>
+                  </p>
+
+                  <button
+                    className={`${styles.buttonSecondary} ${styles.playerCardMobileButton}`}
+                    type="button"
+                    onClick={() => router.push(`/player/${player.puuid}`)}
+                  >
+                    Go to Dashboard
+                  </button>
+                </article>
+              ))}
+            </div>
           </div>
         ) : null}
       </section>

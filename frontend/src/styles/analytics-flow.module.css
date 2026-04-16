@@ -38,6 +38,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
+  position: relative;
 }
 
 .brand {
@@ -54,6 +55,79 @@
   gap: 0.45rem;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.mobileMenuButton {
+  display: none;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(7, 12, 32, 0.86);
+  color: #f7fbff;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    border-color var(--ease-main),
+    background-color var(--ease-main),
+    transform var(--ease-main);
+}
+
+.mobileMenuButton:hover {
+  border-color: rgba(23, 234, 194, 0.44);
+  background: rgba(9, 16, 42, 0.95);
+}
+
+.mobileMenuButtonOpen {
+  border-color: rgba(23, 234, 194, 0.56);
+  background: rgba(8, 16, 41, 0.95);
+}
+
+.mobileMenuIcon {
+  width: 24px;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.mobileMenuBarTop,
+.mobileMenuBarMiddle,
+.mobileMenuBarBottom {
+  display: block;
+  height: 4px;
+  border-radius: 999px;
+  background: #f4f8ff;
+  transition:
+    transform var(--ease-main),
+    opacity var(--ease-main);
+}
+
+.mobileMenuBarTop {
+  width: 11px;
+  margin-left: 0;
+}
+
+.mobileMenuBarMiddle {
+  width: 19px;
+  margin-left: 5px;
+}
+
+.mobileMenuBarBottom {
+  width: 15px;
+  margin-left: 11px;
+}
+
+.mobileMenuButtonOpen .mobileMenuBarTop {
+  transform: translateX(1px);
+}
+
+.mobileMenuButtonOpen .mobileMenuBarMiddle {
+  transform: translateX(-1px);
+}
+
+.mobileMenuButtonOpen .mobileMenuBarBottom {
+  transform: translateX(1px);
 }
 
 .navLink {
@@ -427,6 +501,83 @@
   border: 1px solid rgba(255, 255, 255, 0.16);
 }
 
+.playerResults {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.playerTableDesktop {
+  display: block;
+}
+
+.playerCardsMobile {
+  display: none;
+}
+
+.playerCardMobile {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  padding: 0.85rem;
+  background:
+    linear-gradient(148deg, rgba(11, 19, 44, 0.88), rgba(8, 14, 33, 0.8)),
+    radial-gradient(circle at 92% 6%, rgba(23, 234, 194, 0.13), transparent 46%);
+  display: grid;
+  gap: 0.7rem;
+}
+
+.playerCardMobileHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+
+.playerCardMobileTitle {
+  font-size: 0.95rem;
+  color: #f6fbff;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.playerCardMobileTag {
+  color: rgba(214, 224, 255, 0.78);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.playerCardMobileRegion {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 0.28rem 0.58rem;
+  font-size: 0.75rem;
+  color: rgba(233, 239, 255, 0.9);
+  letter-spacing: 0.04em;
+}
+
+.playerCardMobileStats {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  color: rgba(220, 229, 255, 0.86);
+  font-size: 0.84rem;
+}
+
+.playerCardMobileStats strong {
+  font-size: 1rem;
+  color: #f7fcff;
+}
+
+.playerCardMobileButton {
+  width: 100%;
+}
+
 .table {
   width: 100%;
   min-width: 620px;
@@ -509,6 +660,61 @@
     width: min(1120px, calc(100% - 1rem));
   }
 
+  .navInner {
+    min-height: 62px;
+  }
+
+  .mobileMenuButton {
+    display: inline-flex;
+    flex-shrink: 0;
+  }
+
+  .navLinks {
+    position: absolute;
+    top: calc(100% + 0.45rem);
+    left: 0;
+    right: 0;
+    display: grid;
+    gap: 0.5rem;
+    justify-items: center;
+    justify-content: center;
+    align-items: center;
+    padding: 0.58rem;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background:
+      linear-gradient(150deg, rgba(9, 16, 40, 0.95), rgba(6, 11, 30, 0.94)),
+      radial-gradient(circle at 95% 0%, rgba(23, 234, 194, 0.16), transparent 42%);
+    box-shadow: 0 18px 40px rgba(2, 6, 19, 0.52);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-9px) scale(0.98);
+    transition:
+      opacity var(--ease-main),
+      transform var(--ease-main);
+    max-height: calc(100dvh - 88px);
+    overflow-y: auto;
+    z-index: 40;
+  }
+
+  .navLinksOpen {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+  }
+
+  .navLink {
+    width: min(100%, 360px);
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    border-radius: 12px;
+    font-size: 0.92rem;
+    padding: 0.58rem 0.82rem;
+  }
+
   .heroCard {
     padding: 1.2rem;
   }
@@ -534,5 +740,24 @@
 
   .table {
     min-width: 540px;
+  }
+
+  .playerTableDesktop {
+    display: none;
+  }
+
+  .playerCardsMobile {
+    display: grid;
+    gap: 0.72rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobileMenuButton,
+  .mobileMenuBarTop,
+  .mobileMenuBarMiddle,
+  .mobileMenuBarBottom,
+  .navLinks {
+    transition: none;
   }
 }
