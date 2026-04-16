@@ -447,6 +447,7 @@ export interface FrontendMvpClient {
   getPlayerBanAnalytics(puuid: string, limit: number): Promise<PlayerBanAnalytics>;
   getGlobalMostBanned(limit: number): Promise<GlobalBanEntry[]>;
   getChampionBanRate(championId: number): Promise<ChampionBanRate>;
+  getAllBanRates(): Promise<{ total_matches: number; rates: Record<number, ChampionBanRate> }>;
 
   // Page 6
   getRunesMap(): Promise<RuneMapEntry[]>;//TODO
@@ -838,6 +839,14 @@ const frontendMvpClient: FrontendMvpClient = {
     }
     const banRate = await res.json();
     return banRate;
+  },
+
+  async getAllBanRates() {
+    const res = await fetch(`${_API}/analytics/bans/all-rates`);
+    if (!res.ok) {
+      throw new Error("Failed to fetch ban rates");
+    }
+    return res.json();
   },
 
   async getRunesMap() {

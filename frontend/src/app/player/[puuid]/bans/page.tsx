@@ -67,9 +67,12 @@ export default function BanAnalyticsPage() {
     let mounted = true;
 
     const loadData = async () => {
-      const [playerResponse, globalResponse] = await Promise.all([
+      // Single bulk call replaces 20 parallel /champion/{id}/ban-rate requests
+      // that were exhausting the DB connection pool and causing 503s.
+      const [playerResponse, globalResponse, allRatesResponse] = await Promise.all([
         frontendMvpClient.getPlayerBanAnalytics(puuid, 100),
         frontendMvpClient.getGlobalMostBanned(20),
+        frontendMvpClient.getAllBanRates(),
       ]);
 
       const dedupedPlayerBans: PlayerBanAnalytics = {
@@ -79,12 +82,12 @@ export default function BanAnalyticsPage() {
       };
 
       const dedupedGlobalBans = aggregateGlobalEntries(globalResponse).slice(0, 20);
-      const banRatePairs = await Promise.all(
-        dedupedGlobalBans.map(async (entry) => {
-          const details = await frontendMvpClient.getChampionBanRate(entry.champion_id);
-          return [entry.champion_name, details.ban_rate] as const;
-        }),
-      );
+
+      // Extract ban rates from the bulk response — no extra network requests
+      const banRatePairs = dedupedGlobalBans.map((entry) => {
+        const rateData = allRatesResponse.rates[entry.champion_id];
+        return [entry.champion_name, rateData?.ban_rate ?? 0] as const;
+      });
 
       if (!mounted) {
         return;

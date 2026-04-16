@@ -32,6 +32,7 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 _global_role_cache: TTLCache     = TTLCache()
 _most_banned_cache: TTLCache     = TTLCache()
 _trends_cache:      TTLCacheDict = TTLCacheDict()
+_ban_rate_cache:    TTLCache     = TTLCache()   # caches ALL champion ban-rates in one dict
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +92,39 @@ def _compute_most_banned_sql(db: Session, champion_map: Dict[int, str]) -> List:
     ]
 
 
+def _compute_all_ban_rates(db: Session, champion_map: Dict[int, str]) -> Dict[str, Any]:
+    """
+    Single query that returns ban-rate for every champion at once.
+
+    Replaces the N+1 pattern where the frontend was calling
+    GET /analytics/champion/{id}/ban-rate once per champion (20 concurrent
+    requests → pool exhaustion → 503s).
+
+    Returns a dict with:
+      total_matches: int
+      rates: {champion_id: {champion_name, times_banned, ban_rate}}
+    """
+    total_matches = db.query(func.count(Match.match_id)).scalar() or 0
+
+    rows = (
+        db.query(TeamBans.champion_id, func.count(TeamBans.id).label("times_banned"))
+        .group_by(TeamBans.champion_id)
+        .all()
+    )
+
+    rates: Dict[int, Any] = {}
+    for champ_id, times_banned in rows:
+        ban_rate = round((times_banned / total_matches) * 100, 2) if total_matches else 0.0
+        rates[champ_id] = {
+            "champion_id":   champ_id,
+            "champion_name": champion_map.get(champ_id),
+            "times_banned":  times_banned,
+            "ban_rate":      ban_rate,
+        }
+
+    return {"total_matches": total_matches, "rates": rates}
+
+
 def warm_analytics_caches(db: Session, champion_map: Dict[int, str]) -> None:
     """
     Pre-populate the expensive global analytics caches.
@@ -111,6 +145,12 @@ def warm_analytics_caches(db: Session, champion_map: Dict[int, str]) -> None:
         logger.info("warm_analytics_caches: most-banned ready")
     except Exception as exc:
         logger.warning("warm_analytics_caches: most-banned failed — %s", exc)
+
+    try:
+        _ban_rate_cache.get_or_compute(lambda: _compute_all_ban_rates(db, champion_map))
+        logger.info("warm_analytics_caches: all ban rates ready")
+    except Exception as exc:
+        logger.warning("warm_analytics_caches: ban rates failed — %s", exc)
 
 
 @router.get("/player/{puuid}/bans")
@@ -198,38 +238,51 @@ async def get_player_bans(
     }
 
 
+@router.get("/bans/all-rates")
+async def get_all_ban_rates(
+    db: Session = Depends(get_db),
+) -> Dict[str, Any]:
+    """
+    All champion ban rates in a single cached response.
+
+    Replaces the N+1 pattern of calling /champion/{id}/ban-rate once per
+    champion.  Returns:
+      {
+        "total_matches": int,
+        "rates": { champion_id: { champion_name, times_banned, ban_rate } }
+      }
+    """
+    champion_map = await get_champion_map()
+    return _ban_rate_cache.get_or_compute(
+        lambda: _compute_all_ban_rates(db, champion_map)
+    )
+
+
 @router.get("/champion/{champion_id}/ban-rate")
 async def get_champion_ban_rate(
     champion_id: int,
     db: Session = Depends(get_db),
 ) -> Dict[str, Any]:
-    """Ban rate for a specific champion across all stored matches."""
+    """Ban rate for a specific champion — reads from the shared bulk cache."""
     champion_map = await get_champion_map()
-    total_matches = db.query(func.count(Match.match_id)).scalar()
 
-    if total_matches == 0:
-        return {
-            "champion_id": champion_id,
-            "champion_name": champion_map.get(champion_id),
-            "total_matches": 0,
-            "times_banned": 0,
-            "ban_rate": 0.0,
-        }
-
-    times_banned = (
-        db.query(func.count(TeamBans.id))
-        .filter(TeamBans.champion_id == champion_id)
-        .scalar()
+    # Read from the shared all-rates cache (one DB query populates all champions)
+    all_rates: Dict[str, Any] = _ban_rate_cache.get_or_compute(
+        lambda: _compute_all_ban_rates(db, champion_map)
     )
+    total_matches = all_rates.get("total_matches", 0)
+    entry = all_rates.get("rates", {}).get(champion_id)
 
-    ban_rate = (times_banned / total_matches) * 100 if total_matches > 0 else 0.0
+    if entry:
+        return {**entry, "total_matches": total_matches}
 
+    # Champion has never been banned — still return a valid zero-rate response
     return {
-        "champion_id": champion_id,
+        "champion_id":   champion_id,
         "champion_name": champion_map.get(champion_id),
         "total_matches": total_matches,
-        "times_banned": times_banned,
-        "ban_rate": round(ban_rate, 2),
+        "times_banned":  0,
+        "ban_rate":      0.0,
     }
 
 

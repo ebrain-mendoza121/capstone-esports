@@ -86,7 +86,10 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
         db = SessionLocal()
         try:
             # 2. Global analytics (PERCENTILE_CONT + most-banned GROUP BY)
-            warm_analytics_caches(db, champion_map)
+            # warm_analytics_caches expects {champion_id: name_str}, not full metadata.
+            # get_champion_full_map() returns ChampionMeta objects — extract just the name.
+            name_map = {k: v["name"] if isinstance(v, dict) else str(v) for k, v in champion_map.items()}
+            warm_analytics_caches(db, name_map)
 
             # 3. Player list (GROUP BY participant_stats)
             warm_players_cache(db)

@@ -3,6 +3,19 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import {
+  AreaChart,
+  Area,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+  Legend,
+} from "recharts";
 import styles from "@/app/mvp.module.css";
 import {
   PlayerTrends,
@@ -41,95 +54,185 @@ function streakColor(streak: number) {
   return "#8899bb";
 }
 
-// ── SVG sparkline ──────────────────────────────────────────────────────────
+// ── Recharts shared config ─────────────────────────────────────────────────
 
-interface SparklineProps {
-  data: (number | null)[];
-  wins: boolean[];
-  width?: number;
-  height?: number;
-  label?: string;
+const CHART_COLORS = {
+  kda:              "#1fadff",
+  cs:               "#a78bfa",
+  kp:               "#34d399",
+  gold:             "#fbbf24",
+  win:              "#22c55e",
+  loss:             "#ef4444",
+  grid:             "rgba(255,255,255,0.06)",
+  axis:             "rgba(255,255,255,0.35)",
+  tooltip_bg:       "#0d1b3e",
+  tooltip_border:   "rgba(255,255,255,0.12)",
+};
+
+const CHART_STYLE = { fontSize: 11, fill: CHART_COLORS.axis };
+
+function chartDate(ts: number) {
+  return new Date(ts).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function Sparkline({ data, wins, width = 520, height = 90, label }: SparklineProps) {
-  const valid = data.map((v, i) => ({ v, i, win: wins[i] })).filter((d) => d.v !== null);
+// ── Custom tooltip ─────────────────────────────────────────────────────────
+
+function ChartTooltip({ active, payload, label, formatter }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{
+      background: CHART_COLORS.tooltip_bg,
+      border: `1px solid ${CHART_COLORS.tooltip_border}`,
+      borderRadius: 8,
+      padding: "8px 12px",
+      fontSize: 12,
+    }}>
+      <p style={{ marginBottom: 4, opacity: 0.6, fontSize: 11 }}>{label}</p>
+      {payload.map((entry: any, i: number) => (
+        <p key={i} style={{ color: entry.color, margin: "2px 0" }}>
+          {entry.name}: <strong>{formatter ? formatter(entry.value) : entry.value?.toFixed(2)}</strong>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+// ── Metric area chart ──────────────────────────────────────────────────────
+
+interface MetricChartProps {
+  data: { game: number; value: number | null; win: boolean; date: string }[];
+  color: string;
+  label: string;
+  formatter?: (v: number) => string;
+  referenceY?: number;
+  referenceLabel?: string;
+  yDomain?: [number | "auto" | "dataMin" | "dataMax", number | "auto" | "dataMin" | "dataMax"];
+}
+
+function MetricChart({ data, color, label, formatter, referenceY, referenceLabel, yDomain }: MetricChartProps) {
+  const valid = data.filter((d) => d.value !== null);
   if (valid.length < 2) {
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height, opacity: 0.4, fontSize: 13 }}>
-        Not enough data to render chart
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: 160, opacity: 0.4, fontSize: 13 }}>
+        Not enough data
       </div>
     );
   }
 
-  const values = valid.map((d) => d.v as number);
-  const minV = Math.min(...values);
-  const maxV = Math.max(...values);
-  const range = maxV - minV || 1;
+  return (
+    <div>
+      <p style={{ fontSize: 11, opacity: 0.55, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+        {label}
+      </p>
+      <ResponsiveContainer width="100%" height={160}>
+        <AreaChart data={data} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+          <defs>
+            <linearGradient id={`grad-${label.replace(/\s/g, "")}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+              <stop offset="95%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} />
+          <XAxis dataKey="date" tick={CHART_STYLE} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+          <YAxis tick={CHART_STYLE} tickLine={false} axisLine={false} domain={yDomain ?? ["auto", "auto"]} width={40} />
+          <Tooltip content={<ChartTooltip formatter={formatter} />} />
+          {referenceY !== undefined && (
+            <ReferenceLine y={referenceY} stroke="rgba(255,255,255,0.25)" strokeDasharray="4 4"
+              label={{ value: referenceLabel ?? "", position: "insideTopRight", fontSize: 10, fill: "rgba(255,255,255,0.4)" }} />
+          )}
+          <Area
+            type="monotone"
+            dataKey="value"
+            name={label}
+            stroke={color}
+            strokeWidth={2}
+            fill={`url(#grad-${label.replace(/\s/g, "")})`}
+            dot={(props: any) => {
+              const { cx, cy, payload } = props;
+              return (
+                <circle
+                  key={`dot-${cx}-${cy}`}
+                  cx={cx} cy={cy} r={3.5}
+                  fill={payload.win ? CHART_COLORS.win : CHART_COLORS.loss}
+                  stroke="#050b1d"
+                  strokeWidth={1.5}
+                />
+              );
+            }}
+            activeDot={{ r: 5 }}
+            connectNulls
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
-  const padX = 8;
-  const padY = 8;
-  const innerW = width - padX * 2;
-  const innerH = height - padY * 2;
+// ── Win/loss bar chart ─────────────────────────────────────────────────────
 
-  const points = valid.map((d, idx) => {
-    const x = padX + (idx / (valid.length - 1)) * innerW;
-    const y = padY + (1 - ((d.v as number) - minV) / range) * innerH;
-    return { x, y, win: d.win, v: d.v as number };
-  });
-
-  const pathD = points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+function WinLossChart({ series }: { series: TrendGamePoint[] }) {
+  const data = series.map((g, i) => ({
+    game: i + 1,
+    date: chartDate(g.game_creation),
+    result: g.win ? 1 : -1,
+    win: g.win,
+    kda: g.kda,
+    champion: g.champion,
+  }));
 
   return (
     <div>
-      {label && <p style={{ fontSize: 11, opacity: 0.55, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</p>}
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height, display: "block" }}>
-        {/* baseline */}
-        <line x1={padX} y1={padY + innerH} x2={padX + innerW} y2={padY + innerH}
-          stroke="rgba(255,255,255,0.08)" strokeWidth={1} />
-        {/* area fill */}
-        <path
-          d={`${pathD} L${points[points.length - 1].x.toFixed(1)},${padY + innerH} L${points[0].x.toFixed(1)},${padY + innerH} Z`}
-          fill="url(#sparkGrad)"
-          opacity={0.3}
-        />
-        <defs>
-          <linearGradient id="sparkGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#1fadff" stopOpacity={0.6} />
-            <stop offset="100%" stopColor="#1fadff" stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        {/* line */}
-        <path d={pathD} fill="none" stroke="#1fadff" strokeWidth={2} strokeLinejoin="round" />
-        {/* dots — colored by win/loss */}
-        {points.map((p, i) => (
-          <circle
-            key={i}
-            cx={p.x}
-            cy={p.y}
-            r={4}
-            fill={p.win ? "#22c55e" : "#ef4444"}
-            stroke="#050b1d"
-            strokeWidth={1.5}
+      <p style={{ fontSize: 11, opacity: 0.55, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+        Win / Loss per game
+      </p>
+      <ResponsiveContainer width="100%" height={100}>
+        <LineChart data={data} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={CHART_COLORS.grid} />
+          <XAxis dataKey="date" tick={CHART_STYLE} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+          <YAxis hide domain={[-1.5, 1.5]} />
+          <Tooltip
+            content={({ active, payload }) => {
+              if (!active || !payload?.length) return null;
+              const d = payload[0].payload;
+              return (
+                <div style={{ background: CHART_COLORS.tooltip_bg, border: `1px solid ${CHART_COLORS.tooltip_border}`, borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
+                  <p style={{ margin: 0, color: d.win ? CHART_COLORS.win : CHART_COLORS.loss }}>
+                    <strong>{d.win ? "Win" : "Loss"}</strong> — {d.date}
+                  </p>
+                  {d.champion && <p style={{ margin: "2px 0", opacity: 0.7 }}>{d.champion}</p>}
+                  {d.kda != null && <p style={{ margin: 0, opacity: 0.7 }}>KDA {d.kda.toFixed(2)}</p>}
+                </div>
+              );
+            }}
           />
-        ))}
-      </svg>
+          <ReferenceLine y={0} stroke="rgba(255,255,255,0.15)" />
+          <Line
+            type="step"
+            dataKey="result"
+            name="Result"
+            stroke="transparent"
+            dot={(props: any) => {
+              const { cx, cy, payload } = props;
+              return (
+                <circle
+                  key={`wl-${cx}-${cy}`}
+                  cx={cx} cy={cy} r={5}
+                  fill={payload.win ? CHART_COLORS.win : CHART_COLORS.loss}
+                  stroke="#050b1d"
+                  strokeWidth={1.5}
+                />
+              );
+            }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
     </div>
   );
 }
 
 // ── KPI card ───────────────────────────────────────────────────────────────
 
-function KpiCard({
-  label,
-  value,
-  sub,
-  color,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  color?: string;
-}) {
+function KpiCard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
     <article className={styles.kpiCard}>
       <p className={styles.kpiLabel}>{label}</p>
@@ -144,31 +247,17 @@ function KpiCard({
 // ── Game history row ───────────────────────────────────────────────────────
 
 function GameRow({ g }: { g: TrendGamePoint }) {
-  const date = new Date(g.game_creation).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
+  const date = new Date(g.game_creation).toLocaleDateString(undefined, { month: "short", day: "numeric" });
   return (
     <tr>
       <td>
-        <span
-          style={{
-            display: "inline-block",
-            width: 8,
-            height: 8,
-            borderRadius: "50%",
-            background: g.win ? "var(--color-win, #22c55e)" : "var(--color-loss, #ef4444)",
-            marginRight: 6,
-          }}
-        />
+        <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: g.win ? "var(--color-win,#22c55e)" : "var(--color-loss,#ef4444)", marginRight: 6 }} />
         {g.win ? "Win" : "Loss"}
       </td>
       <td>{date}</td>
       <td>{g.champion ?? "—"}</td>
       <td>{g.role ?? "—"}</td>
-      <td>
-        {g.kills ?? "—"}/{g.deaths ?? "—"}/{g.assists ?? "—"}
-      </td>
+      <td>{g.kills ?? "—"}/{g.deaths ?? "—"}/{g.assists ?? "—"}</td>
       <td>{fmt(g.kda)}</td>
       <td>{fmt(g.cs_per_min)}</td>
       <td>{pct(g.kill_participation)}</td>
@@ -183,56 +272,51 @@ export default function TrendsPage() {
   const puuid = Array.isArray(params.puuid) ? params.puuid[0] : params.puuid;
 
   const [trends, setTrends] = useState<PlayerTrends | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError]   = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let mounted = true;
     frontendMvpClient
       .getPlayerTrends(puuid, 20)
-      .then((data) => {
-        if (mounted) setTrends(data);
-      })
-      .catch((err) => {
-        if (mounted) setError(err instanceof Error ? err.message : "Failed to load trends.");
-      })
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
-    return () => {
-      mounted = false;
-    };
+      .then((data) => { if (mounted) setTrends(data); })
+      .catch((err) => { if (mounted) setError(err instanceof Error ? err.message : "Failed to load trends."); })
+      .finally(() => { if (mounted) setLoading(false); });
+    return () => { mounted = false; };
   }, [puuid]);
 
-  if (loading) {
-    return (
-      <main className={styles.page}>
-        <div className={styles.container}>
-          <p className={styles.loading}>Loading trends…</p>
-        </div>
-      </main>
-    );
-  }
+  if (loading) return (
+    <main className={styles.page}><div className={styles.container}>
+      <p className={styles.loading}>Loading trends…</p>
+    </div></main>
+  );
 
-  if (error) {
-    return (
-      <main className={styles.page}>
-        <div className={styles.container}>
-          <p className={styles.loading}>{error}</p>
-          <Link className={styles.linkChip} href={`/player/${puuid}`}>← Back to Dashboard</Link>
-        </div>
-      </main>
-    );
-  }
+  if (error) return (
+    <main className={styles.page}><div className={styles.container}>
+      <p className={styles.loading}>{error}</p>
+      <Link className={styles.linkChip} href={`/player/${puuid}`}>← Back to Dashboard</Link>
+    </div></main>
+  );
 
   const rolling = trends?.rolling;
-  const series = trends?.series ?? [];
-  const wins = series.map((g) => g.win);
+  const series  = trends?.series ?? [];
+
+  // Build per-metric chart data (oldest → newest, already sorted by backend)
+  const chartData = series.map((g, i) => ({
+    game:  i + 1,
+    date:  chartDate(g.game_creation),
+    win:   g.win,
+    kda:   g.kda,
+    cs:    g.cs_per_min,
+    kp:    g.kill_participation != null ? +(g.kill_participation * 100).toFixed(1) : null,
+    gold:  g.gold_per_min,
+  }));
 
   return (
     <main className={styles.page}>
       <div className={styles.container}>
-        {/* header */}
+
+        {/* ── Header ── */}
         <header className={styles.hero}>
           <p className={styles.eyebrow}>Performance Trends</p>
           <div className={styles.heroTitleRow}>
@@ -260,84 +344,83 @@ export default function TrendsPage() {
               <div className={styles.sectionHeader}>
                 <div>
                   <h2 className={styles.sectionTitle}>Rolling Window — Last {trends?.games_in_window} Games</h2>
-                  <p className={styles.sectionCopy}>
-                    The exact feature vector fed into every ML model (temporal leakage guard applied).
-                  </p>
+                  <p className={styles.sectionCopy}>The exact feature vector fed into every ML model.</p>
                 </div>
               </div>
               <div className={styles.kpiGrid}>
-                <KpiCard label="Win Rate" value={pct(rolling.win_rate_20)} />
-                <KpiCard label="Avg KDA" value={fmt(rolling.avg_kda_20)} />
-                <KpiCard label="Avg CS/Min" value={fmt(rolling.avg_cs_per_min_20)} />
-                <KpiCard label="Kill Part." value={pct(rolling.avg_kill_part_20)} />
-                <KpiCard label="Gold/Min" value={fmt(rolling.avg_gold_per_min_20, 0)} />
-                <KpiCard label="Vision/Min" value={fmt(rolling.vision_per_min_20)} />
-                <KpiCard
-                  label="Win Streak"
-                  value={streakLabel(rolling.win_streak)}
-                  color={streakColor(rolling.win_streak)}
-                />
-                <KpiCard
-                  label="CS Trend (10g)"
-                  value={`${trendArrow(rolling.cs_trend_10)} ${fmt(rolling.cs_trend_10, 4)}`}
-                  sub="slope of cs/min"
-                  color={trendColor(rolling.cs_trend_10)}
-                />
-                <KpiCard
-                  label="KDA Volatility"
-                  value={fmt(rolling.kda_std_10)}
-                  sub="std dev last 10"
-                />
-                <KpiCard
-                  label="Death Rate"
-                  value={fmt(rolling.death_rate_20)}
-                  sub="avg deaths/game"
-                />
+                <KpiCard label="Win Rate"      value={pct(rolling.win_rate_20)} />
+                <KpiCard label="Avg KDA"       value={fmt(rolling.avg_kda_20)} />
+                <KpiCard label="Avg CS/Min"    value={fmt(rolling.avg_cs_per_min_20)} />
+                <KpiCard label="Kill Part."    value={pct(rolling.avg_kill_part_20)} />
+                <KpiCard label="Gold/Min"      value={fmt(rolling.avg_gold_per_min_20, 0)} />
+                <KpiCard label="Vision/Min"    value={fmt(rolling.vision_per_min_20)} />
+                <KpiCard label="Win Streak"    value={streakLabel(rolling.win_streak)}    color={streakColor(rolling.win_streak)} />
+                <KpiCard label="CS Trend (10g)" value={`${trendArrow(rolling.cs_trend_10)} ${fmt(rolling.cs_trend_10, 4)}`} sub="slope of cs/min" color={trendColor(rolling.cs_trend_10)} />
+                <KpiCard label="KDA Volatility" value={fmt(rolling.kda_std_10)} sub="std dev last 10" />
+                <KpiCard label="Death Rate"    value={fmt(rolling.death_rate_20)} sub="avg deaths/game" />
               </div>
             </section>
 
-            {/* ── Sparkline charts ── */}
+            {/* ── Charts ── */}
             {series.length >= 2 && (
               <section className={styles.section}>
                 <div className={styles.sectionHeader}>
                   <div>
                     <h2 className={styles.sectionTitle}>Trend Charts</h2>
                     <p className={styles.sectionCopy}>
-                      Dots colored green (win) / red (loss). Older games on left.
+                      Hover for exact values. Dots: <span style={{ color: CHART_COLORS.win }}>●</span> win &nbsp;
+                      <span style={{ color: CHART_COLORS.loss }}>●</span> loss.
                     </p>
                   </div>
                 </div>
 
+                {/* Win/loss timeline */}
+                <div className={styles.dataCard} style={{ marginBottom: 16 }}>
+                  <WinLossChart series={series} />
+                </div>
+
+                {/* 2-column metric charts */}
                 <div className={styles.twoCol}>
                   <div className={styles.dataCard}>
-                    <Sparkline
-                      data={series.map((g) => g.kda)}
-                      wins={wins}
+                    <MetricChart
+                      data={chartData.map((d) => ({ ...d, value: d.kda }))}
+                      color={CHART_COLORS.kda}
                       label="KDA per game"
+                      referenceY={rolling.avg_kda_20 ?? undefined}
+                      referenceLabel="avg"
                     />
                   </div>
                   <div className={styles.dataCard}>
-                    <Sparkline
-                      data={series.map((g) => g.cs_per_min)}
-                      wins={wins}
+                    <MetricChart
+                      data={chartData.map((d) => ({ ...d, value: d.cs }))}
+                      color={CHART_COLORS.cs}
                       label="CS/min per game"
+                      referenceY={rolling.avg_cs_per_min_20 ?? undefined}
+                      referenceLabel="avg"
                     />
                   </div>
                 </div>
 
                 <div className={styles.twoCol} style={{ marginTop: 16 }}>
                   <div className={styles.dataCard}>
-                    <Sparkline
-                      data={series.map((g) => g.kill_participation)}
-                      wins={wins}
-                      label="Kill participation per game"
+                    <MetricChart
+                      data={chartData.map((d) => ({ ...d, value: d.kp }))}
+                      color={CHART_COLORS.kp}
+                      label="Kill participation % per game"
+                      formatter={(v) => `${v.toFixed(1)}%`}
+                      yDomain={[0, 100]}
+                      referenceY={rolling.avg_kill_part_20 != null ? +(rolling.avg_kill_part_20 * 100).toFixed(1) : undefined}
+                      referenceLabel="avg"
                     />
                   </div>
                   <div className={styles.dataCard}>
-                    <Sparkline
-                      data={series.map((g) => g.gold_per_min)}
-                      wins={wins}
+                    <MetricChart
+                      data={chartData.map((d) => ({ ...d, value: d.gold }))}
+                      color={CHART_COLORS.gold}
                       label="Gold/min per game"
+                      formatter={(v) => v.toFixed(0)}
+                      referenceY={rolling.avg_gold_per_min_20 ?? undefined}
+                      referenceLabel="avg"
                     />
                   </div>
                 </div>
@@ -376,14 +459,13 @@ export default function TrendsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {series.map((g, i) => (
-                    <GameRow key={i} g={g} />
-                  ))}
+                  {series.map((g, i) => <GameRow key={i} g={g} />)}
                 </tbody>
               </table>
             </div>
           </section>
         )}
+
       </div>
     </main>
   );
