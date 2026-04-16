@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker, DeclarativeBase
 
 from app.core.settings import get_settings
@@ -39,6 +39,24 @@ _pool_kwargs = (
 )
 
 engine = create_engine(settings.database_url, **_pool_kwargs)
+
+# ---------------------------------------------------------------------------
+# Per-connection statement timeout
+# ---------------------------------------------------------------------------
+# Set a 20-second statement_timeout on every newly opened PostgreSQL
+# connection.  This is well under both the 30-s pool_timeout (so a timed-out
+# query releases the connection before the next caller gives up waiting) and
+# the 60-s request timeout in main.py (so callers get a proper DB error, not
+# a gateway 504).
+#
+# Skipped for SQLite (tests) — SQLite has no statement_timeout support.
+if not _is_sqlite:
+    @event.listens_for(engine, "connect")
+    def _set_statement_timeout(dbapi_conn, _connection_record):
+        """Apply a 20 s statement timeout on every fresh connection."""
+        with dbapi_conn.cursor() as cur:
+            cur.execute("SET statement_timeout = 20000")  # milliseconds
+
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 

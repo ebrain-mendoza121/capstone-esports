@@ -1,6 +1,7 @@
 import logging
 import time
-from typing import Dict, List, Any
+import threading
+from typing import Dict, List, Any, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import OperationalError as SAOperationalError, TimeoutError as SATimeoutError
@@ -21,6 +22,37 @@ from app.services.feature_extractor import get_rolling_features
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
+
+# ---------------------------------------------------------------------------
+# Simple in-process TTL cache — avoids repeated full-table scans for the two
+# O(all-data) queries: global role baselines and most-banned champions.
+# Thread-safe via a per-cache lock.  TTL is conservative (5 min) so cached
+# data stays fresh enough for a capstone demo.
+# ---------------------------------------------------------------------------
+_CACHE_TTL = 300  # seconds
+
+class _TTLCache:
+    """Minimal thread-safe TTL cache for a single computed value."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._value: Optional[Any] = None
+        self._expires_at: float = 0.0
+
+    def get(self) -> Optional[Any]:
+        with self._lock:
+            if time.monotonic() < self._expires_at:
+                return self._value
+            return None
+
+    def set(self, value: Any) -> None:
+        with self._lock:
+            self._value = value
+            self._expires_at = time.monotonic() + _CACHE_TTL
+
+
+_global_role_cache: _TTLCache = _TTLCache()
+_most_banned_cache: _TTLCache = _TTLCache()
 
 
 @router.get("/player/{puuid}/bans")
@@ -150,15 +182,20 @@ async def get_most_banned_champions(
 ) -> List[Dict[str, Any]]:
     """Most banned champions across all stored matches."""
     champion_map = await get_champion_map()
+
+    # Cache the full-table GROUP BY so concurrent requests share one DB hit.
+    cached: Optional[List] = _most_banned_cache.get()
+    if cached is not None:
+        return cached[:limit]
+
     most_banned = (
         db.query(TeamBans.champion_id, func.count(TeamBans.id).label("ban_count"))
         .group_by(TeamBans.champion_id)
         .order_by(desc("ban_count"))
-        .limit(limit)
-        .all()
+        .all()  # fetch all, slice in Python so cache works for any limit
     )
 
-    return [
+    result = [
         {
             "champion_id": champ_id,
             "champion_name": champion_map.get(champ_id),
@@ -166,6 +203,8 @@ async def get_most_banned_champions(
         }
         for champ_id, count in most_banned
     ]
+    _most_banned_cache.set(result)
+    return result[:limit]
 
 
 @router.get("/runes/map")
@@ -288,37 +327,42 @@ async def get_role_performance(
             "roles": [],
         }
 
-    # Step 2: global stats per role across ALL tracked players (peer baseline)
-    global_role_sql = text("""
-        SELECT
-            ps.role,
-            COUNT(*)                                      AS total_games,
-            ROUND(AVG(ps.win::int)::numeric, 4)           AS global_win_rate,
-            ROUND(AVG(dm.kda)::numeric, 3)                AS global_avg_kda,
-            ROUND(AVG(dm.cs_per_min)::numeric, 3)         AS global_avg_cs,
-            PERCENTILE_CONT(0.25) WITHIN GROUP
-                (ORDER BY ps.win::int)                    AS wr_p25,
-            PERCENTILE_CONT(0.50) WITHIN GROUP
-                (ORDER BY ps.win::int)                    AS wr_p50,
-            PERCENTILE_CONT(0.75) WITHIN GROUP
-                (ORDER BY ps.win::int)                    AS wr_p75,
-            PERCENTILE_CONT(0.25) WITHIN GROUP
-                (ORDER BY dm.cs_per_min)                  AS cs_p25,
-            PERCENTILE_CONT(0.50) WITHIN GROUP
-                (ORDER BY dm.cs_per_min)                  AS cs_p50,
-            PERCENTILE_CONT(0.75) WITHIN GROUP
-                (ORDER BY dm.cs_per_min)                  AS cs_p75
-        FROM participant_stats ps
-        JOIN players p ON p.id = ps.player_id
-        JOIN derived_metrics dm
-          ON dm.match_id = ps.match_id AND dm.puuid = p.puuid
-        WHERE ps.role IN ('TOP','JUNGLE','MIDDLE','BOTTOM','UTILITY')
-        GROUP BY ps.role
-    """)
-    global_rows = {
-        row["role"]: dict(row)
-        for row in db.execute(global_role_sql).mappings().all()
-    }
+    # Step 2: global stats per role across ALL tracked players (peer baseline).
+    # This full-table PERCENTILE_CONT scan is expensive — cache for 5 minutes so
+    # concurrent requests don't each trigger an independent full-table scan.
+    global_rows: Dict[str, Any] = _global_role_cache.get()  # type: ignore[assignment]
+    if global_rows is None:
+        global_role_sql = text("""
+            SELECT
+                ps.role,
+                COUNT(*)                                      AS total_games,
+                ROUND(AVG(ps.win::int)::numeric, 4)           AS global_win_rate,
+                ROUND(AVG(dm.kda)::numeric, 3)                AS global_avg_kda,
+                ROUND(AVG(dm.cs_per_min)::numeric, 3)         AS global_avg_cs,
+                PERCENTILE_CONT(0.25) WITHIN GROUP
+                    (ORDER BY ps.win::int)                    AS wr_p25,
+                PERCENTILE_CONT(0.50) WITHIN GROUP
+                    (ORDER BY ps.win::int)                    AS wr_p50,
+                PERCENTILE_CONT(0.75) WITHIN GROUP
+                    (ORDER BY ps.win::int)                    AS wr_p75,
+                PERCENTILE_CONT(0.25) WITHIN GROUP
+                    (ORDER BY dm.cs_per_min)                  AS cs_p25,
+                PERCENTILE_CONT(0.50) WITHIN GROUP
+                    (ORDER BY dm.cs_per_min)                  AS cs_p50,
+                PERCENTILE_CONT(0.75) WITHIN GROUP
+                    (ORDER BY dm.cs_per_min)                  AS cs_p75
+            FROM participant_stats ps
+            JOIN players p ON p.id = ps.player_id
+            JOIN derived_metrics dm
+              ON dm.match_id = ps.match_id AND dm.puuid = p.puuid
+            WHERE ps.role IN ('TOP','JUNGLE','MIDDLE','BOTTOM','UTILITY')
+            GROUP BY ps.role
+        """)
+        global_rows = {
+            row["role"]: dict(row)
+            for row in db.execute(global_role_sql).mappings().all()
+        }
+        _global_role_cache.set(global_rows)
 
     def _percentile_label(value: float, p25: float, p50: float, p75: float) -> str:
         if value >= p75:

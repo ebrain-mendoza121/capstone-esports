@@ -1,6 +1,6 @@
 from typing import Optional
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy import String, Integer, ForeignKey, Boolean
+from sqlalchemy import String, Integer, ForeignKey, Boolean, Index
 
 from app.db.session import Base
 
@@ -78,3 +78,13 @@ class ParticipantStats(Base):
 
     match = relationship("Match", back_populates="participant_stats")
     player = relationship("Player", back_populates="participant_stats")
+
+    __table_args__ = (
+        # Covering index for the list_players GROUP BY and the metrics join.
+        # Lets PostgreSQL satisfy COUNT(match_id) GROUP BY player_id and
+        # JOIN ON player_id = X AND match_id = Y via a pure index scan.
+        Index("ix_participant_stats_player_match", "player_id", "match_id"),
+        # Composite for role-performance per-player queries
+        # (WHERE player_id = X AND role IN (...))
+        Index("ix_participant_stats_player_role", "player_id", "role"),
+    )
