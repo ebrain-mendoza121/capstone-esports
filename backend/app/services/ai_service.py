@@ -1443,6 +1443,14 @@ def train_earlygame_model(db: Session) -> dict:
     # ------------------------------------------------------------------
     # Step 1 — Collect all timeline features in one call
     # ------------------------------------------------------------------
+    # Override any server-side statement_timeout (e.g. Supabase free-tier
+    # default of 30 s) so the bulk CTE query can complete.  The HTTP-level
+    # 600 s middleware timeout is still the outer guard.
+    try:
+        db.execute(text("SET LOCAL statement_timeout = 0"))
+    except Exception:
+        pass  # non-Postgres back-ends or read-only replicas — ignore silently
+
     _t0 = time.time()
     df = get_all_timeline_features_bulk(db)
     logger.info("Timeline feature fetch: %.1f seconds", time.time() - _t0)
