@@ -6,9 +6,20 @@ export function normalizeApiBaseUrl(raw: string | undefined): string {
   const value = stripTrailingSlash((raw ?? "").trim());
   if (!value) return "";
 
-  // If the frontend is served over HTTPS, force HTTPS for API calls as well.
-  if (typeof window !== "undefined" && window.location.protocol === "https:" && value.startsWith("http://")) {
-    return `https://${value.slice("http://".length)}`;
+  if (value.startsWith("http://")) {
+    const host = value.slice("http://".length);
+
+    // Never upgrade localhost — local dev must stay http
+    const isLocal =
+      host.startsWith("localhost") ||
+      host.startsWith("127.0.0.1") ||
+      host.startsWith("0.0.0.0");
+
+    if (!isLocal) {
+      // Non-localhost http is always wrong in production — force https.
+      // This runs safely at module load time (no window dependency).
+      return `https://${host}`;
+    }
   }
 
   return value;

@@ -6,19 +6,28 @@ import { buildApiUrl, getApiBaseUrl } from "@/lib/apiBaseUrl";
 
 const QUICK_PUUID = "GXO6oaJPECfKU3Zr_5CAiUCEpGNGVq5zRrmXWbfoih49CX5D4_bw360rWA9skKW5Qf5PblEY7MNdtA";
 
-interface QuickPlayer {
-  riot_id: string;
-  tag_line: string;
-  region: string;
-  match_count: number;
+type CallState = "idle" | "loading" | "ok" | "error";
+
+interface EndpointResult {
+  label: string;
+  path: string;
+  state: CallState;
+  httpStatus: number | null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: any;
+  error: string | null;
 }
 
-interface QuickMetrics {
-  matches: number;
-  win_rate: number;
-  kda: number;
-  cs_per_min: number;
-}
+const PUUID_ENDPOINTS = [
+  { label: "Player Profile",      path: `/players/${QUICK_PUUID}/` },
+  { label: "Metrics",             path: `/metrics/player/${QUICK_PUUID}/` },
+  { label: "Match History (20)",  path: `/matches/player/${QUICK_PUUID}/?limit=20` },
+  { label: "Role Performance",    path: `/analytics/player/${QUICK_PUUID}/role-performance` },
+  { label: "Objective Control",   path: `/analytics/player/${QUICK_PUUID}/objective-control` },
+  { label: "Ban Analytics",       path: `/analytics/player/${QUICK_PUUID}/bans/?limit=20` },
+  { label: "Playstyle (AI)",      path: `/ai/playstyle/${QUICK_PUUID}` },
+  { label: "Champion Recs (AI)",  path: `/ai/champions/${QUICK_PUUID}?top_n=5` },
+];
 
 type Probe = {
   label: string;
@@ -52,28 +61,41 @@ export default function HomePage() {
   const [protocol, setProtocol] = useState<string>("unknown");
   const [resolvedApiBase, setResolvedApiBase] = useState<string>("");
 
-  // Quick player card
-  const [player, setPlayer] = useState<QuickPlayer | null>(null);
-  const [metrics, setMetrics] = useState<QuickMetrics | null>(null);
-  const [playerStatus, setPlayerStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  // Per-endpoint results for the PUUID test card
+  const [results, setResults] = useState<EndpointResult[]>(
+    PUUID_ENDPOINTS.map((e) => ({ ...e, state: "idle", httpStatus: null, data: null, error: null }))
+  );
+  const [runningAll, setRunningAll] = useState(false);
 
   const envRaw = process.env.NEXT_PUBLIC_API_URL ?? "";
 
   useEffect(() => {
     setProtocol(window.location.protocol);
     setResolvedApiBase(getApiBaseUrl());
-
-    // Auto-load player card on mount
-    setPlayerStatus("loading");
-    Promise.all([
-      fetch(buildApiUrl(`/players/${QUICK_PUUID}/`)).then((r) => r.ok ? r.json() : null),
-      fetch(buildApiUrl(`/metrics/player/${QUICK_PUUID}/`)).then((r) => r.ok ? r.json() : null),
-    ]).then(([p, m]) => {
-      setPlayer(p as QuickPlayer | null);
-      setMetrics(m as QuickMetrics | null);
-      setPlayerStatus(p ? "ok" : "error");
-    }).catch(() => setPlayerStatus("error"));
   }, []);
+
+  const runEndpoint = async (index: number) => {
+    const ep = PUUID_ENDPOINTS[index];
+    setResults((prev) => prev.map((r, i) => i === index ? { ...r, state: "loading", httpStatus: null, data: null, error: null } : r));
+    try {
+      const res = await fetch(buildApiUrl(ep.path));
+      const httpStatus = res.status;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let data: any = null;
+      try { data = await res.json(); } catch { data = null; }
+      setResults((prev) => prev.map((r, i) => i === index ? { ...r, state: res.ok ? "ok" : "error", httpStatus, data, error: res.ok ? null : `HTTP ${httpStatus}` } : r));
+    } catch (err) {
+      setResults((prev) => prev.map((r, i) => i === index ? { ...r, state: "error", httpStatus: null, data: null, error: err instanceof Error ? err.message : "Failed" } : r));
+    }
+  };
+
+  const runAll = async () => {
+    setRunningAll(true);
+    for (let i = 0; i < PUUID_ENDPOINTS.length; i++) {
+      await runEndpoint(i);
+    }
+    setRunningAll(false);
+  };
 
   const protocolWarning = useMemo(() => {
     if (protocol === "https:" && envRaw.startsWith("http://")) {
@@ -151,62 +173,76 @@ export default function HomePage() {
           </p>
         </section>
 
-        {/* ── Quick Player Card ── */}
+        {/* ── PUUID Endpoint Test Card ── */}
         <section style={{ marginTop: 16, padding: 16, border: "1px solid rgba(148,163,184,0.35)", borderRadius: 10, background: "rgba(2,6,23,0.35)" }}>
-          <strong style={{ fontSize: 13, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>Quick Player Card</strong>
-          {playerStatus === "loading" && (
-            <p style={{ marginTop: 10, color: "#94a3b8", fontSize: 14 }}>Loading player…</p>
-          )}
-          {playerStatus === "error" && (
-            <p style={{ marginTop: 10, color: "#fca5a5", fontSize: 14 }}>
-              Player not found — make sure the backend is running and this PUUID is ingested.
-            </p>
-          )}
-          {playerStatus === "ok" && player && (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.35)", borderRadius: 10, padding: "10px 18px" }}>
-                  <div style={{ fontSize: 22, fontWeight: 800 }}>{player.riot_id}<span style={{ color: "#64748b" }}>#{player.tag_line}</span></div>
-                  <div style={{ marginTop: 4, fontSize: 12, color: "#94a3b8" }}>Region: {player.region} · {player.match_count} matches stored</div>
-                </div>
-                {metrics && (
-                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    {[
-                      { label: "Win Rate", value: `${(metrics.win_rate * 100).toFixed(1)}%`, highlight: metrics.win_rate >= 0.5 },
-                      { label: "KDA", value: metrics.kda.toFixed(2), highlight: metrics.kda >= 3 },
-                      { label: "CS/Min", value: metrics.cs_per_min.toFixed(1), highlight: false },
-                      { label: "Games", value: String(metrics.matches), highlight: false },
-                    ].map(({ label, value, highlight }) => (
-                      <div key={label} style={{
-                        padding: "8px 14px",
-                        borderRadius: 8,
-                        background: highlight ? "rgba(16,185,129,0.12)" : "rgba(255,255,255,0.05)",
-                        border: "1px solid rgba(148,163,184,0.2)",
-                        textAlign: "center",
-                      }}>
-                        <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>{label}</div>
-                        <div style={{ fontSize: 18, fontWeight: 700, color: highlight ? "#34d399" : "#e5e7eb" }}>{value}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Link href={`/player/${QUICK_PUUID}`} style={{ padding: "7px 14px", borderRadius: 8, background: "rgba(99,102,241,0.25)", border: "1px solid rgba(99,102,241,0.45)", color: "#c7d2fe", textDecoration: "none", fontSize: 13, fontWeight: 600 }}>
-                  → Player Dashboard
-                </Link>
-                <Link href={`/player/${QUICK_PUUID}/matches`} style={{ padding: "7px 14px", borderRadius: 8, background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", color: "#c7d2fe", textDecoration: "none", fontSize: 13, fontWeight: 600 }}>
-                  → Match History
-                </Link>
-                <Link href={`/player/${QUICK_PUUID}/champions`} style={{ padding: "7px 14px", borderRadius: 8, background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", color: "#c7d2fe", textDecoration: "none", fontSize: 13, fontWeight: 600 }}>
-                  → Champion Stats
-                </Link>
-                <Link href={`/player/${QUICK_PUUID}/trends`} style={{ padding: "7px 14px", borderRadius: 8, background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", color: "#c7d2fe", textDecoration: "none", fontSize: 13, fontWeight: 600 }}>
-                  → Trends
-                </Link>
-              </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <strong style={{ fontSize: 13, color: "#94a3b8", letterSpacing: "0.06em", textTransform: "uppercase" }}>Player Endpoint Tests</strong>
+              <div style={{ marginTop: 4, fontSize: 11, color: "#475569", wordBreak: "break-all" }}>{QUICK_PUUID}</div>
             </div>
-          )}
+            <button
+              onClick={() => void runAll()}
+              disabled={runningAll}
+              style={{ padding: "8px 18px", borderRadius: 8, background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.45)", color: "#6ee7b7", fontWeight: 700, cursor: runningAll ? "wait" : "pointer", fontSize: 13 }}
+            >
+              {runningAll ? "Running…" : "▶ Run All"}
+            </button>
+          </div>
+
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+            {results.map((r, i) => (
+              <div key={r.path} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 12px", borderRadius: 8, background: "rgba(15,23,42,0.5)", border: `1px solid ${r.state === "ok" ? "rgba(16,185,129,0.3)" : r.state === "error" ? "rgba(239,68,68,0.3)" : "rgba(148,163,184,0.15)"}` }}>
+                {/* Status dot */}
+                <div style={{ marginTop: 3, width: 10, height: 10, borderRadius: "50%", flexShrink: 0, background: r.state === "ok" ? "#22c55e" : r.state === "error" ? "#ef4444" : r.state === "loading" ? "#facc15" : "#334155" }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>
+                    <span style={{ fontWeight: 700, fontSize: 13 }}>{r.label}</span>
+                    <span style={{ fontSize: 12, color: "#94a3b8" }}>{r.path}</span>
+                  </div>
+                  {r.state === "ok" && r.httpStatus && (
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#86efac" }}>
+                      HTTP {r.httpStatus} ·{" "}
+                      {r.data !== null ? (
+                        Array.isArray(r.data)
+                          ? `Array[${r.data.length}]`
+                          : typeof r.data === "object"
+                            ? Object.keys(r.data).slice(0, 4).join(", ") + (Object.keys(r.data).length > 4 ? "…" : "")
+                            : String(r.data)
+                      ) : "ok"}
+                    </div>
+                  )}
+                  {r.state === "error" && (
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#fca5a5" }}>{r.error ?? "Failed"}{r.httpStatus ? ` · HTTP ${r.httpStatus}` : ""}</div>
+                  )}
+                  {r.state === "loading" && (
+                    <div style={{ marginTop: 4, fontSize: 12, color: "#fde68a" }}>Loading…</div>
+                  )}
+                </div>
+                <button
+                  onClick={() => void runEndpoint(i)}
+                  disabled={r.state === "loading" || runningAll}
+                  style={{ flexShrink: 0, padding: "4px 10px", borderRadius: 6, background: "rgba(99,102,241,0.2)", border: "1px solid rgba(99,102,241,0.35)", color: "#a5b4fc", fontSize: 11, cursor: "pointer" }}
+                >
+                  Test
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Nav links */}
+          <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {[
+              { label: "→ Player Dashboard", href: `/player/${QUICK_PUUID}` },
+              { label: "→ Match History",    href: `/player/${QUICK_PUUID}/matches` },
+              { label: "→ Champion Stats",   href: `/player/${QUICK_PUUID}/champions` },
+              { label: "→ Trends",           href: `/player/${QUICK_PUUID}/trends` },
+              { label: "→ Bans",             href: `/player/${QUICK_PUUID}/bans` },
+            ].map(({ label, href }) => (
+              <Link key={href} href={href} style={{ padding: "6px 12px", borderRadius: 8, background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", color: "#c7d2fe", textDecoration: "none", fontSize: 12, fontWeight: 600 }}>
+                {label}
+              </Link>
+            ))}
+          </div>
         </section>
 
         <div style={{ marginTop: 16, padding: 14, border: "1px solid rgba(148,163,184,0.35)", borderRadius: 10, background: "rgba(2,6,23,0.35)" }}>
