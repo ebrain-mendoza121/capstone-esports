@@ -4,4 +4,7 @@ __pycache__/
 .env
 
 mcp.json
-ml_models/*.joblib
+# ml_models/*.joblib — intentionally NOT ignored so trained models survive redeploys.
+# Models are small (~500 KB total) and must be committed to git so Railway/Render
+# includes them in the deployment image.  Retrain locally and commit the new
+# .joblib files whenever the training data or sklearn version changes.
