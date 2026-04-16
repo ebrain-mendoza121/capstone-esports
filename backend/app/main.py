@@ -66,14 +66,6 @@ app = FastAPI(title="Esports Analytics API", version="0.1.0", lifespan=_lifespan
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 # ---------------------------------------------------------------------------
 # Request timeout middleware.
@@ -81,11 +73,16 @@ app.add_middleware(
 # Backfill endpoints: 600 s — these are CPU-only DB operations that can
 # legitimately take several minutes when processing thousands of rows.
 # Returns 504 so callers know to retry rather than wait forever.
+#
+# IMPORTANT: this middleware is registered BEFORE CORSMiddleware so that CORS
+# is the outermost layer.  In Starlette, the last middleware added wraps all
+# previous ones — keeping CORS outside ensures all responses (including 504s
+# from this middleware) carry the correct Access-Control-Allow-Origin header.
 # ---------------------------------------------------------------------------
 @app.middleware("http")
 async def _timeout_middleware(request: Request, call_next):
     # Bulk import and backfill paths get a generous timeout; everything else gets 60s
-    _long_timeout_prefixes = ("/backfill", "/matchups/import")
+    _long_timeout_prefixes = ("/backfill", "/matchups/import", "/ai/train")
     timeout = 600.0 if any(request.url.path.startswith(p) for p in _long_timeout_prefixes) else 60.0
     try:
         return await asyncio.wait_for(call_next(request), timeout=timeout)
@@ -104,6 +101,19 @@ async def _timeout_middleware(request: Request, call_next):
                 "path": request.url.path,
             },
         )
+
+
+# CORSMiddleware is registered LAST so it wraps the timeout middleware above.
+# Every response — including 504 timeouts — will carry the correct
+# Access-Control-Allow-Origin header, preventing the browser from masking
+# real errors as opaque CORS failures.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 app.include_router(health_router)

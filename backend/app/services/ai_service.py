@@ -60,6 +60,7 @@ _model_cache: dict[str, dict] = {}
 _ARTIFACT_ROUTE_SLUG: dict[str, str] = {
     "playstyle_kmeans":    "playstyle",
     "win_predictor":       "win-prediction",
+    "matchup_predictor":   "matchup-prediction",
     "kda_regressor":       "kda-regression",
     "champion_clusters":   "champion-clusters",
     "cs_regressor":        "cs-regression",
@@ -235,6 +236,24 @@ def _load_model(name: str) -> dict:
 
         artifact: dict = joblib.load(path)
 
+        # Backward-compat: older artifacts may predate xgboost_version metadata.
+        # If this is the only missing key, inject runtime version and persist.
+        if "xgboost_version" not in artifact:
+            artifact["xgboost_version"] = _XGBOOST_VERSION
+            try:
+                joblib.dump(artifact, path)
+                logger.info(
+                    "Upgraded legacy artifact '%s' with xgboost_version=%s",
+                    name,
+                    _XGBOOST_VERSION,
+                )
+            except Exception:
+                logger.warning(
+                    "Could not persist upgraded metadata for artifact '%s'; continuing in-memory",
+                    name,
+                    exc_info=True,
+                )
+
         # --- Schema validation -----------------------------------------------
         missing = _ARTIFACT_REQUIRED_KEYS - artifact.keys()
         if missing:
@@ -377,6 +396,24 @@ def train_playstyle_model(db: Session) -> dict:
 
     path = ML_MODELS_DIR / "playstyle_kmeans.joblib"
     joblib.dump(artifact, path)
+
+    meta = {
+        "model_type":      "kmeans",
+        "trained_at":      artifact["trained_at"],
+        "n_samples":       len(eligible),
+        "sklearn_version": _SKLEARN_VERSION,
+        "xgboost_version": _XGBOOST_VERSION,
+        "feature_cols":    CLUSTERING_FEATURES,
+        "cluster_labels":  cluster_labels,
+        "metrics": {
+            "silhouette_score": round(sil, 4),
+            "inertia":          round(float(model.inertia_), 4),
+            "n_clusters":       4,
+        },
+    }
+    meta_path = ML_MODELS_DIR / "playstyle_kmeans_meta.json"
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
     # Evict then re-cache so the in-process copy has version metadata too
     invalidate_model_cache("playstyle_kmeans")
     _model_cache["playstyle_kmeans"] = artifact
@@ -1406,6 +1443,14 @@ def train_earlygame_model(db: Session) -> dict:
     # ------------------------------------------------------------------
     # Step 1 — Collect all timeline features in one call
     # ------------------------------------------------------------------
+    # Override any server-side statement_timeout (e.g. Supabase free-tier
+    # default of 30 s) so the bulk CTE query can complete.  The HTTP-level
+    # 600 s middleware timeout is still the outer guard.
+    try:
+        db.execute(text("SET LOCAL statement_timeout = 0"))
+    except Exception:
+        pass  # non-Postgres back-ends or read-only replicas — ignore silently
+
     _t0 = time.time()
     df = get_all_timeline_features_bulk(db)
     logger.info("Timeline feature fetch: %.1f seconds", time.time() - _t0)
@@ -1644,6 +1689,7 @@ def get_model_status() -> dict:
     models = {
         "playstyle_kmeans":    "playstyle_kmeans.joblib",
         "win_predictor":       "win_predictor.joblib",
+        "matchup_predictor":   "matchup_predictor.joblib",
         "kda_regressor":       "kda_regressor.joblib",
         "cs_regressor":        "cs_regressor.joblib",
         "earlygame_predictor": "earlygame_predictor.joblib",
@@ -2020,6 +2066,7 @@ def train_champion_clusters(db: Session) -> dict:
         "trained_at":           trained_at,
         "n_samples":            len(df),
         "sklearn_version":      _SKLEARN_VERSION,
+        "xgboost_version":      _XGBOOST_VERSION,
         "metrics": {
             "silhouette_score": round(sil, 4),
             "n_clusters":       n_clusters,
@@ -2029,6 +2076,25 @@ def train_champion_clusters(db: Session) -> dict:
 
     path = ML_MODELS_DIR / "champion_clusters.joblib"
     joblib.dump(artifact, path)
+
+    meta = {
+        "model_type":      "kmeans",
+        "trained_at":      trained_at,
+        "n_samples":       len(df),
+        "sklearn_version": _SKLEARN_VERSION,
+        "xgboost_version": _XGBOOST_VERSION,
+        "feature_cols":    champ_feature_cols,
+        "cluster_labels":  champion_cluster_labels,
+        "metrics": {
+            "silhouette_score": round(sil, 4),
+            "n_clusters":       n_clusters,
+            "n_champions":      len(df),
+        },
+    }
+    meta_path = ML_MODELS_DIR / "champion_clusters_meta.json"
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    invalidate_model_cache("champion_clusters")
     _model_cache["champion_clusters"] = artifact
     logger.info(
         "champion_clusters trained — %d champions, %d clusters, silhouette=%.3f",
@@ -2736,6 +2802,30 @@ def train_matchup_predictor(db: Session) -> dict:
 
     path = ML_MODELS_DIR / "matchup_predictor.joblib"
     joblib.dump(artifact, path)
+
+    meta = {
+        "model_type":      best_type,
+        "trained_at":      trained_at,
+        "n_samples":       len(X),
+        "n_train":         len(X_train),
+        "n_test":          len(X_test),
+        "sklearn_version": _SKLEARN_VERSION,
+        "xgboost_version": _XGBOOST_VERSION,
+        "feature_cols":    available_cols,
+        "train_medians":   train_medians,
+        "metrics": {
+            "accuracy": round(best_acc, 4),
+            "roc_auc":  round(best_auc, 4),
+            "lr_auc":   round(lr_auc, 4),
+            "xgb_auc":  round(xgb_auc, 4),
+        },
+        "top_factors": artifact["top_factors"],
+    }
+    meta_path = ML_MODELS_DIR / "matchup_predictor_meta.json"
+    meta_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+
+    invalidate_model_cache("matchup_predictor")
+    _model_cache["matchup_predictor"] = artifact
 
     return {
         "status":      "trained",

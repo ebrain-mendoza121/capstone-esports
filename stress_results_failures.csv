@@ -1,0 +1,2 @@
+Method,Name,Error,Occurrences
+GET,GET /analytics/player/{puuid}/role-performance,"ConnectionResetError(54, 'Connection reset by peer')",1

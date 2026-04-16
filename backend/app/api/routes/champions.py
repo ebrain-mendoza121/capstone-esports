@@ -41,6 +41,10 @@ router = APIRouter(prefix="/champions", tags=["champions"])
 # Valid roles for champions browse endpoints (display-oriented)
 _VALID_CHAMPION_ROLES = {"TOP", "JUNGLE", "MID", "BOTTOM", "SUPPORT"}
 
+# Accepted raw inputs for /by-role/{role}: canonical display names + Riot's
+# internal lane names (MIDDLE, UTILITY), but NOT abbreviations (ADC, BOT, …).
+_VALID_BY_ROLE_INPUTS = {"TOP", "JUNGLE", "MID", "MIDDLE", "BOTTOM", "SUPPORT", "UTILITY"}
+
 # Valid roles for matchup endpoints (participant_stats-oriented)
 _VALID_MATCHUP_ROLES = {"TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"}
 
@@ -129,26 +133,35 @@ async def list_champions(
     champ_map = await _full_map()
 
     # Normalise filters
-    role_filter   = normalize_role(role) if role else None
     tag_filter    = tag.capitalize() if tag  else None
     search_filter = search.lower() if search else None
 
-    if role_filter and role_filter not in _VALID_CHAMPION_ROLES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid role '{role}'. Valid roles: {', '.join(sorted(_VALID_CHAMPION_ROLES))}",
-        )
+    # Validate role BEFORE normalising — normalize_role() returns None for unknown
+    # inputs (e.g. "CARRY"), which would silently bypass the check below.
+    role_filter: Optional[str] = None
+    if role:
+        role_filter = normalize_role(role)
+        if not role_filter or role_filter not in _VALID_CHAMPION_ROLES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid role '{role}'. Valid roles: {', '.join(sorted(_VALID_CHAMPION_ROLES))}",
+            )
 
     results: List[Dict[str, Any]] = []
     for meta in champ_map.values():
         role_tiers = get_champion_role_tiers(meta["id"], meta["name"])
+
+        # Display affinity: tier data takes priority; fall back to DDragon.
         role_affinity = visible_roles_from_tiers(role_tiers)
         if not role_affinity:
             role_affinity = convert_ddragon_roles_to_display(meta["role_affinity"])
 
-        # Role filter
-        if role_filter and role_filter not in role_affinity:
-            continue
+        # Role filter: union of ALL tier entries + DDragon affinity.
+        if role_filter:
+            all_tier_roles = {e["role"] for e in role_tiers}
+            ddragon_roles  = set(convert_ddragon_roles_to_display(meta.get("role_affinity", [])))
+            if role_filter not in (all_tier_roles | ddragon_roles):
+                continue
         # Tag filter
         if tag_filter and tag_filter not in meta["tags"]:
             continue
@@ -194,22 +207,38 @@ async def champions_by_role(role: str) -> Dict[str, Any]:
     Example: GET /champions/by-role/MID
     Returns Mages and Assassins (and Specialists with mid affinity).
     """
-    role_upper = normalize_role(role)
-    if role_upper not in _VALID_CHAMPION_ROLES:
+    # Validate the raw input against the explicit allow-list — abbreviations
+    # like "ADC" or "BOT" are rejected even though normalize_role maps them
+    # to valid display roles.  Riot internal names (MIDDLE, UTILITY) are
+    # accepted and normalised to display names (MID, SUPPORT) below.
+    role_raw = role.strip().upper()
+    if role_raw not in _VALID_BY_ROLE_INPUTS:
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid role '{role}'. Valid roles: {', '.join(sorted(_VALID_CHAMPION_ROLES))}",
+            detail=f"Invalid role '{role}'. Valid roles: {', '.join(sorted(_VALID_BY_ROLE_INPUTS))}",
         )
+    # Normalise to display role (MIDDLE → MID, UTILITY → SUPPORT, rest unchanged)
+    role_upper = normalize_role(role_raw) or role_raw
 
     champ_map = await _full_map()
 
     results = []
     for meta in champ_map.values():
         role_tiers = get_champion_role_tiers(meta["id"], meta["name"])
+
+        # Display affinity: tier data takes priority; fall back to DDragon.
         role_affinity = visible_roles_from_tiers(role_tiers)
         if not role_affinity:
             role_affinity = convert_ddragon_roles_to_display(meta["role_affinity"])
-        if role_upper not in role_affinity:
+
+        # Filter affinity: union of ALL tier entries + DDragon affinity so that
+        # champions with a secondary role listed only in DDragon (or in a B tier)
+        # still surface when that role is requested.
+        all_tier_roles = {e["role"] for e in role_tiers}
+        ddragon_roles  = set(convert_ddragon_roles_to_display(meta.get("role_affinity", [])))
+        filter_roles   = all_tier_roles | ddragon_roles
+
+        if role_upper not in filter_roles:
             continue
         results.append({
             "id":           meta["id"],

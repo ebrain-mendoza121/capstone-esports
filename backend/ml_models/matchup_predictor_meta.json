@@ -1,0 +1,85 @@
+{
+  "model_type": "xgboost",
+  "trained_at": "2026-04-16T04:12:12.442965+00:00",
+  "n_samples": 2432,
+  "n_train": 1945,
+  "n_test": 487,
+  "sklearn_version": "1.8.0",
+  "xgboost_version": "3.2.0",
+  "feature_cols": [
+    "t100_win_rate_20",
+    "t100_avg_kda_20",
+    "t100_avg_cs_per_min_20",
+    "t100_avg_gold_per_min_20",
+    "t100_vision_per_min_20",
+    "t100_avg_kill_part_20",
+    "t100_avg_role_norm_kda_20",
+    "t200_win_rate_20",
+    "t200_avg_kda_20",
+    "t200_avg_cs_per_min_20",
+    "t200_avg_gold_per_min_20",
+    "t200_vision_per_min_20",
+    "win_rate_diff",
+    "kda_diff",
+    "cs_diff",
+    "gold_diff",
+    "vision_diff",
+    "kill_part_diff",
+    "role_norm_kda_diff",
+    "patch_version_float",
+    "t100_tracked",
+    "t200_tracked"
+  ],
+  "train_medians": {
+    "t100_win_rate_20": 0.5292892156862745,
+    "t100_avg_kda_20": 3.801882330827068,
+    "t100_avg_cs_per_min_20": 6.940666666666667,
+    "t100_avg_gold_per_min_20": 432.30752777777775,
+    "t100_vision_per_min_20": 1.2248055555555557,
+    "t100_avg_kill_part_20": 0.4936566666666667,
+    "t100_avg_role_norm_kda_20": 0.0370008379277986,
+    "t200_win_rate_20": 0.5138888888888888,
+    "t200_avg_kda_20": 3.83,
+    "t200_avg_cs_per_min_20": 6.66125,
+    "t200_avg_gold_per_min_20": 428.10187016317013,
+    "t200_vision_per_min_20": 1.372971212121212,
+    "win_rate_diff": 0.0,
+    "kda_diff": -0.05498571428571397,
+    "cs_diff": 0.02904137641898874,
+    "gold_diff": 1.7866375661375855,
+    "vision_diff": -0.02140084033613454,
+    "kill_part_diff": -0.001854962121212056,
+    "role_norm_kda_diff": -0.02203049547802563,
+    "patch_version_float": 16.06,
+    "t100_tracked": 2.0,
+    "t200_tracked": 2.0
+  },
+  "metrics": {
+    "accuracy": 0.5051,
+    "roc_auc": 0.4898,
+    "lr_auc": 0.4812,
+    "xgb_auc": 0.4898
+  },
+  "top_factors": [
+    {
+      "feature": "t200_tracked",
+      "importance": 0.0743
+    },
+    {
+      "feature": "patch_version_float",
+      "importance": 0.052
+    },
+    {
+      "feature": "t100_avg_role_norm_kda_20",
+      "importance": 0.0491
+    },
+    {
+      "feature": "t200_vision_per_min_20",
+      "importance": 0.0489
+    },
+    {
+      "feature": "t100_avg_gold_per_min_20",
+      "importance": 0.0481
+    }
+  ]
+}

@@ -7,6 +7,7 @@ snake_case in OpenAPI docs automatically).
 Endpoint map:
   POST /ai/train/playstyle           → train KMeans playstyle model
   POST /ai/train/win-prediction      → train win-prediction classifier
+    POST /ai/train/all                 → train all models sequentially
   POST /ai/train/kda-regression      → train KDA regression model
   POST /ai/train/cs-regression       → train CS/min regression model
   POST /ai/train/early-game          → train early-game predictor
@@ -44,6 +45,7 @@ from app.services.ai_service import (
     predict_win,
     run_win_prediction_backtest,
     train_cs_regressor,
+    train_champion_clusters,
     train_earlygame_model,
     train_kda_regressor,
     train_matchup_predictor,
@@ -58,6 +60,9 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 
 # ---------------------------------------------------------------------------
 # Training endpoints
+# All routes are synchronous and block until training completes.
+# The /ai/train/* prefix receives a 600 s timeout (same as /backfill) so
+# these never hit the default 60 s middleware cutoff.
 # ---------------------------------------------------------------------------
 
 
@@ -65,14 +70,8 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 def train_playstyle(db: Session = Depends(get_db)) -> dict:
     """
     Train the KMeans playstyle clustering model on all ingested players.
-
-    Returns training metrics and centroid snapshots.  After training,
-    review ``CLUSTER_LABELS`` in ``ai_service.py`` and update label
-    names to match the centroid characteristics before exposing
-    ``GET /ai/playstyle/{puuid}`` to end users.
-
-    Raises 422 when the database has fewer than 20 players with 10+
-    ranked matches.
+    Returns training metrics and centroid snapshots when complete.
+    Raises 422 when the database has fewer than 20 players with 10+ ranked matches.
     """
     try:
         return train_playstyle_model(db)
@@ -85,7 +84,6 @@ def train_win_prediction(db: Session = Depends(get_db)) -> dict:
     """
     Train the win-prediction model (Logistic Regression vs XGBoost).
     The better model by ROC-AUC is saved to ``win_predictor.joblib``.
-
     Raises 422 when fewer than 100 labeled training rows exist.
     """
     try:
@@ -97,15 +95,8 @@ def train_win_prediction(db: Session = Depends(get_db)) -> dict:
 @router.post("/train/matchup-prediction", summary="Train match-level win-prediction model")
 def train_matchup_prediction(db: Session = Depends(get_db)) -> dict:
     """
-    Train the matchup-level win-prediction model.
-
-    Unlike /train/win-prediction (per-player rows), this model trains on one
-    row per match using team-vs-team differential features. This directly
-    captures relative team strength rather than isolated player stats,
-    resulting in meaningfully higher AUC.
-
-    Requires at least 50 unique ranked matches in the database.
-    Model saved to matchup_predictor.joblib.
+    Train the matchup-level win-prediction model (team-vs-team differentials).
+    Requires at least 50 unique ranked matches. Saved to ``matchup_predictor.joblib``.
     """
     try:
         return train_matchup_predictor(db)
@@ -118,10 +109,6 @@ def train_kda_regression(db: Session = Depends(get_db)) -> dict:
     """
     Train the KDA regression model (Ridge vs XGBRegressor).
     The better model by R² is saved to ``kda_regressor.joblib``.
-
-    Features are rolling prior-game stats only; current-game outcomes
-    (kills, deaths, assists) are never included to prevent target leakage.
-
     Raises 422 when fewer than 100 labeled training rows exist.
     """
     try:
@@ -135,10 +122,6 @@ def train_cs_regression(db: Session = Depends(get_db)) -> dict:
     """
     Train the CS/min regression model (Ridge vs XGBRegressor).
     The better model by R² is saved to ``cs_regressor.joblib``.
-
-    Identical pipeline to KDA regression with a separate scaler,
-    separate artifact, and separate output files.
-
     Raises 422 when fewer than 100 labeled training rows exist.
     """
     try:
@@ -151,13 +134,8 @@ def train_cs_regression(db: Session = Depends(get_db)) -> dict:
 def train_early_game(db: Session = Depends(get_db)) -> dict:
     """
     Train the early-game predictor (Logistic Regression) on T=10 and T=15 minute
-    timeline differentials.  The model predicts team 100's win probability from
-    gold/XP/level/CS diffs and first-objective flags.
-
-    Requires matches to have been ingested with ``fetch_timeline=true``.
-
+    timeline differentials. Requires matches ingested with ``fetch_timeline=true``.
     Raises 422 when fewer than 50 matches with timeline frame data exist.
-    Raises 503 on any unexpected training error.
     """
     try:
         return train_earlygame_model(db)
@@ -165,10 +143,80 @@ def train_early_game(db: Session = Depends(get_db)) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
         logger.exception("Unexpected error training early-game model")
-        raise HTTPException(
-            status_code=503,
-            detail=f"Early-game model training failed: {exc}",
-        ) from exc
+        raise HTTPException(status_code=503, detail=f"Early-game model training failed: {exc}") from exc
+
+
+@router.post("/train/all", summary="Train all models sequentially")
+def train_all_models(db: Session = Depends(get_db)) -> dict:
+    """
+    Train all model artifacts sequentially in one blocking call.
+    Returns a per-model summary of results, skips, and failures.
+    Individual InsufficientDataError failures are recorded but do not abort the run.
+    """
+    import time as _time
+
+    trainers = [
+        ("playstyle_kmeans",    train_playstyle_model),
+        ("win_predictor",       train_win_predictor),
+        ("matchup_predictor",   train_matchup_predictor),
+        ("kda_regressor",       train_kda_regressor),
+        ("cs_regressor",        train_cs_regressor),
+        ("earlygame_predictor", train_earlygame_model),
+        ("champion_clusters",   train_champion_clusters),
+    ]
+    total = len(trainers)
+    summary: dict[str, dict] = {}
+    run_start = _time.time()
+
+    for step, (model_name, trainer) in enumerate(trainers, start=1):
+        logger.info("[%d/%d] Starting: %s", step, total, model_name)
+        t0 = _time.time()
+        try:
+            result = trainer(db)
+            elapsed = round(_time.time() - t0, 1)
+            logger.info("[%d/%d] ✓ Completed: %s (%.1fs)", step, total, model_name, elapsed)
+            summary[model_name] = {
+                "step":    step,
+                "status":  "trained",
+                "elapsed_s": elapsed,
+                "result":  result,
+            }
+        except InsufficientDataError as exc:
+            elapsed = round(_time.time() - t0, 1)
+            logger.warning("[%d/%d] ⚠ Skipped: %s — %s", step, total, model_name, exc)
+            summary[model_name] = {
+                "step":    step,
+                "status":  "skipped",
+                "elapsed_s": elapsed,
+                "reason":  str(exc),
+            }
+        except Exception as exc:
+            elapsed = round(_time.time() - t0, 1)
+            db.rollback()  # clear aborted transaction so subsequent trainers can run
+            logger.exception("[%d/%d] ✗ Failed: %s (%.1fs)", step, total, model_name, elapsed)
+            summary[model_name] = {
+                "step":    step,
+                "status":  "failed",
+                "elapsed_s": elapsed,
+                "error":   str(exc),
+            }
+
+    total_elapsed = round(_time.time() - run_start, 1)
+    trained  = sum(1 for v in summary.values() if v["status"] == "trained")
+    skipped  = sum(1 for v in summary.values() if v["status"] == "skipped")
+    failed   = sum(1 for v in summary.values() if v["status"] == "failed")
+
+    logger.info(
+        "train/all complete in %.1fs — %d trained, %d skipped, %d failed",
+        total_elapsed, trained, skipped, failed,
+    )
+    return {
+        "total_elapsed_s": total_elapsed,
+        "trained":  trained,
+        "skipped":  skipped,
+        "failed":   failed,
+        "summary":  summary,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -629,11 +677,10 @@ def train_champion_clusters_endpoint(db: Session = Depends(get_db)) -> dict:
     Requires at least 8 distinct champions with 3+ games each.
     Run after ingesting a representative set of matches.
     """
-    from app.services.ai_service import train_champion_clusters, InsufficientDataError
     try:
         return train_champion_clusters(db)
-    except InsufficientDataError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        logger.exception("champion-clusters training error")
-        raise HTTPException(status_code=500, detail=str(e))
+    except InsufficientDataError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("Unexpected error training champion clusters model")
+        raise HTTPException(status_code=503, detail=f"Champion-clusters model training failed: {exc}") from exc

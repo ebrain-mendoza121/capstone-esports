@@ -33,7 +33,7 @@ _PG_ONLY = pytest.mark.xfail(
 
 @pytest.mark.integration
 def test_model_status_returns_valid_shape(client):
-    """GET /ai/models/status returns a dict with the 5 expected model keys."""
+    """GET /ai/models/status returns a dict with the expected model keys."""
     response = client.get("/ai/models/status")
     assert response.status_code == 200
 
@@ -41,9 +41,11 @@ def test_model_status_returns_valid_shape(client):
     expected_keys = {
         "playstyle_kmeans",
         "win_predictor",
+        "matchup_predictor",
         "kda_regressor",
         "cs_regressor",
         "earlygame_predictor",
+        "champion_clusters",
     }
     assert expected_keys.issubset(set(data.keys())), (
         f"Missing model keys: {expected_keys - set(data.keys())}"

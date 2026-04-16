@@ -1,0 +1,34 @@
+{
+  "model_type": "kmeans",
+  "trained_at": "2026-04-16T04:11:26.310931+00:00",
+  "n_samples": 681,
+  "sklearn_version": "1.8.0",
+  "xgboost_version": "3.2.0",
+  "feature_cols": [
+    "avg_kda",
+    "avg_cs_per_min",
+    "avg_gold_per_min",
+    "avg_kill_participation",
+    "avg_damage_share",
+    "avg_vision_per_min",
+    "avg_kills",
+    "avg_deaths",
+    "avg_assists",
+    "avg_wards_placed",
+    "avg_vision_score",
+    "first_blood_rate",
+    "physical_dmg_pct",
+    "magic_dmg_pct"
+  ],
+  "cluster_labels": {
+    "3": "carry",
+    "1": "skirmisher",
+    "0": "support_utility",
+    "2": "farm_efficiency"
+  },
+  "metrics": {
+    "silhouette_score": 0.2553,
+    "inertia": 3758.5599,
+    "n_clusters": 4
+  }
+}

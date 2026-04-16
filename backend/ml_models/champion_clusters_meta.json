@@ -1,0 +1,26 @@
+{
+  "model_type": "kmeans",
+  "trained_at": "2026-04-16T04:15:23.746554+00:00",
+  "n_samples": 172,
+  "sklearn_version": "1.8.0",
+  "xgboost_version": "3.2.0",
+  "feature_cols": [
+    "avg_kda",
+    "avg_cs_per_min",
+    "avg_gold_per_min",
+    "avg_kill_part",
+    "avg_vision",
+    "avg_damage_share"
+  ],
+  "cluster_labels": {
+    "0": "cluster_0",
+    "1": "versatile",
+    "2": "farm_carry",
+    "3": "utility"
+  },
+  "metrics": {
+    "silhouette_score": 0.3529,
+    "n_clusters": 4,
+    "n_champions": 172
+  }
+}
