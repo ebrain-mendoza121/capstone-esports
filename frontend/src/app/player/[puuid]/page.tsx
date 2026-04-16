@@ -83,16 +83,12 @@ export default function PlayerDashboardPage() {
         if (ingestGameName && ingestTagLine) {
           setIngesting(true);
           // Kick off ingest (may already be running from match page background fetch)
-          void fetch(`${process.env.NEXT_PUBLIC_API_URL || "https://capstone-esports-production.up.railway.app"}/ingest/player`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              gameName: ingestGameName,
-              tagLine: ingestTagLine,
-              platform: ingestPlatform ?? "NA",
-              count: 20,
-              queue: 420,
-            }),
+          void frontendMvpClient.ingestPlayer({
+            gameName: ingestGameName,
+            tagLine: ingestTagLine,
+            platform: ingestPlatform ?? "NA",
+            matchCount: 20,
+            queue: 420,
           }).then(() => {
             if (mounted) void loadData();
           }).catch(() => {
