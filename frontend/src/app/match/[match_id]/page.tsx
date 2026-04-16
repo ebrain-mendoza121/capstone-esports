@@ -4,6 +4,7 @@ import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import styles from "@/app/mvp.module.css";
+import { buildApiUrl } from "@/lib/apiBaseUrl";
 import {
   DraftData,
   EarlyGamePrediction,
@@ -244,8 +245,8 @@ export default function MatchDetailPage() {
         frontendMvpClient.getMatch(matchId),
         frontendMvpClient.getMatchDraft(matchId).catch(() => null),
         frontendMvpClient.getEarlyGamePrediction(matchId).catch(() => null),
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/champions`).then((r) => r.ok ? r.json() : { champions: [] }).catch(() => ({ champions: [] })),
-        fetch(`${process.env.NEXT_PUBLIC_API_URL}/analytics/runes/map`).then((r) => r.ok ? r.json() : {}).catch(() => ({})),
+        fetch(buildApiUrl("/champions")).then((r) => r.ok ? r.json() : { champions: [] }).catch(() => ({ champions: [] })),
+        fetch(buildApiUrl("/analytics/runes/map")).then((r) => r.ok ? r.json() : {}).catch(() => ({})),
         frontendMvpClient.getThreatWeights().catch(() => null),
         frontendMvpClient.getWinPredictionBacktest(80).catch(() => null),
       ]);
@@ -261,7 +262,7 @@ export default function MatchDetailPage() {
       const parsedVersion = verMatch?.[1] ?? "15.8.1";
 
       // Fetch DDragon item names using the resolved version
-      let parsedItemNames: Record<number, string> = {};
+      const parsedItemNames: Record<number, string> = {};
       try {
         const itemRes = await fetch(`https://ddragon.leagueoflegends.com/cdn/${parsedVersion}/data/en_US/item.json`);
         if (itemRes.ok) {
@@ -339,7 +340,7 @@ export default function MatchDetailPage() {
       `/player/${puuid}?gameName=${encodeURIComponent(riotId)}&tagLine=${encodeURIComponent(tagLine)}&platform=${encodeURIComponent(platform)}`
     );
     // Fire background ingest so the dashboard has data by the time it's needed
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/ingest/player`, {
+    fetch(buildApiUrl("/ingest/player"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ gameName: riotId, tagLine, platform, count: 20, queue: 420 }),

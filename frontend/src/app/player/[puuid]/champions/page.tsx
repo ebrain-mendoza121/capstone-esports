@@ -9,6 +9,7 @@ import {
   PlayerChampionStats,
   frontendMvpClient,
 } from "@/lib/frontendMvpClient";
+import { buildApiUrl } from "@/lib/apiBaseUrl";
 
 const ROLES = ["ALL", "TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"] as const;
 type RoleFilter = (typeof ROLES)[number];
@@ -60,7 +61,7 @@ export default function ChampionStatsPage() {
       try {
         const [statsData, champsRes] = await Promise.all([
           frontendMvpClient.getPlayerChampionStats(puuid, 1),
-          fetch(`${process.env.NEXT_PUBLIC_API_URL}/champions`),
+          fetch(buildApiUrl("/champions")),
         ]);
 
         const champsJson = champsRes.ok

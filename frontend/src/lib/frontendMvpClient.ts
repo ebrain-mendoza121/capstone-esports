@@ -1,14 +1,6 @@
-function normalizeApiBaseUrl(raw: string | undefined): string {
-  const value = (raw ?? "").trim().replace(/\/$/, "");
-  if (!value) return "";
+import { getApiBaseUrl } from "@/lib/apiBaseUrl";
 
-  if (typeof window !== "undefined" && window.location.protocol === "https:" && value.startsWith("http://")) {
-    return `https://${value.slice("http://".length)}`;
-  }
-  return value;
-}
-
-const _API = normalizeApiBaseUrl(process.env.NEXT_PUBLIC_API_URL);
+const _API = getApiBaseUrl();
 
 export type QueueCode = 420 | 440;
 export type RoleCode = "TOP" | "JUNGLE" | "MID" | "BOT" | "SUPPORT";

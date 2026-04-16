@@ -104,6 +104,18 @@ export default function PlayerDashboardPage() {
     return () => { mounted = false; };
   }, [puuid, ingestGameName, ingestTagLine, ingestPlatform]);
 
+  const createdAtLabel = useMemo(() => {
+    if (!player) return "—";
+    return new Date(player.created_at).toLocaleDateString();
+  }, [player]);
+
+  const modelsTrained = useMemo(() => {
+    if (!modelsStatus) return null;
+    const entries = Object.values(modelsStatus);
+    if (entries.length === 0) return null;
+    return entries.every((m) => m.trained);
+  }, [modelsStatus]);
+
   if (ingesting) {
     return (
       <main className={styles.page}>
@@ -123,18 +135,6 @@ export default function PlayerDashboardPage() {
       </main>
     );
   }
-
-  const createdAtLabel = useMemo(() => {
-    if (!player) return "—";
-    return new Date(player.created_at).toLocaleDateString();
-  }, [player]);
-
-  const modelsTrained = useMemo(() => {
-    if (!modelsStatus) return null;
-    const entries = Object.values(modelsStatus);
-    if (entries.length === 0) return null;
-    return entries.every((m) => m.trained);
-  }, [modelsStatus]);
 
   if (error) {
     return (

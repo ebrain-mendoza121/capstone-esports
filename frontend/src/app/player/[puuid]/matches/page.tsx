@@ -179,7 +179,7 @@ export default function MatchHistoryPage() {
             <div>
               <h2 className={styles.sectionTitle}>Matches</h2>
               <p className={styles.sectionCopy}>
-                Win Prob. column shows AI model output — shows "—" until model is trained.
+                Win Prob. column shows AI model output — shows &quot;—&quot; until model is trained.
               </p>
             </div>
           </div>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import AppFrame from "@/components/layout/AppFrame";
 import PageHeader from "@/components/ui/PageHeader";
+import { getApiBaseUrl } from "@/lib/apiBaseUrl";
 import styles from "@/styles/analytics-flow.module.css";
 
 // ---------------------------------------------------------------------------
@@ -623,7 +624,7 @@ function MatchupResultsPanel({
 type MatchupStep = "pick-my" | "pick-opp" | "results";
 
 export default function ChampionsPage() {
-  const API = process.env.NEXT_PUBLIC_API_URL ?? "";
+  const API = getApiBaseUrl();
 
   // Champion list
   const [champions, setChampions] = useState<ChampionEntry[]>([]);
