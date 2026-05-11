@@ -174,12 +174,12 @@ function GoldDiffChart({ points }: { points: GoldDiffPoint[] }) {
     const a = svgPts[i];
     const b = svgPts[i + 1];
     if (a.diff >= 0 === b.diff >= 0) {
-      segs.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, color: a.diff >= 0 ? "#22c55e" : "#ef4444" });
+      segs.push({ x1: a.x, y1: a.y, x2: b.x, y2: b.y, color: a.diff >= 0 ? "var(--color-win)" : "var(--color-loss)" });
     } else {
       const t = a.diff / (a.diff - b.diff);
       const mx = a.x + t * (b.x - a.x);
-      segs.push({ x1: a.x, y1: a.y, x2: mx, y2: zeroY, color: a.diff >= 0 ? "#22c55e" : "#ef4444" });
-      segs.push({ x1: mx, y1: zeroY, x2: b.x, y2: b.y, color: b.diff >= 0 ? "#22c55e" : "#ef4444" });
+      segs.push({ x1: a.x, y1: a.y, x2: mx, y2: zeroY, color: a.diff >= 0 ? "var(--color-win)" : "var(--color-loss)" });
+      segs.push({ x1: mx, y1: zeroY, x2: b.x, y2: b.y, color: b.diff >= 0 ? "var(--color-win)" : "var(--color-loss)" });
     }
   }
 
@@ -207,14 +207,14 @@ function GoldDiffChart({ points }: { points: GoldDiffPoint[] }) {
         </text>
       ))}
       {/* Y-axis labels */}
-      <text x={PAD_L - 4} y={PAD_T + 10} textAnchor="end" fontSize={10} fill="#22c55e">+{kMax}k</text>
+      <text x={PAD_L - 4} y={PAD_T + 10} textAnchor="end" fontSize={10} fill="var(--color-win)">+{kMax}k</text>
       <text x={PAD_L - 4} y={zeroY + 4} textAnchor="end" fontSize={10} fill="rgba(255,255,255,0.42)">0</text>
-      <text x={PAD_L - 4} y={PAD_T + innerH} textAnchor="end" fontSize={10} fill="#ef4444">-{kMax}k</text>
+      <text x={PAD_L - 4} y={PAD_T + innerH} textAnchor="end" fontSize={10} fill="var(--color-loss)">-{kMax}k</text>
       {/* Legend */}
-      <circle cx={PAD_L + 10} cy={PAD_T + 8} r={4} fill="#22c55e" />
-      <text x={PAD_L + 18} y={PAD_T + 12} fontSize={10} fill="#22c55e">Blue leads</text>
-      <circle cx={PAD_L + 82} cy={PAD_T + 8} r={4} fill="#ef4444" />
-      <text x={PAD_L + 90} y={PAD_T + 12} fontSize={10} fill="#ef4444">Red leads</text>
+      <circle cx={PAD_L + 10} cy={PAD_T + 8} r={4} fill="var(--color-win)" />
+      <text x={PAD_L + 18} y={PAD_T + 12} fontSize={10} fill="var(--color-win)">Blue leads</text>
+      <circle cx={PAD_L + 82} cy={PAD_T + 8} r={4} fill="var(--color-loss)" />
+      <text x={PAD_L + 90} y={PAD_T + 12} fontSize={10} fill="var(--color-loss)">Red leads</text>
     </svg>
   );
 }
@@ -418,7 +418,7 @@ export default function MatchDetailPage() {
                   earlyGame.team_100_win_probability !== null && earlyGame.team_100_win_probability >= 0.5
                     ? styles.badgeWin : styles.badgeLoss
                 }>
-                  🔵 Blue Win Prob:{" "}
+                  Blue Win Prob:{" "}
                   {earlyGame.team_100_win_probability !== null
                     ? `${(earlyGame.team_100_win_probability * 100).toFixed(1)}%`
                     : "—"}
@@ -427,7 +427,7 @@ export default function MatchDetailPage() {
                   earlyGame.team_200_win_probability !== null && earlyGame.team_200_win_probability >= 0.5
                     ? styles.badgeWin : styles.badgeLoss
                 }>
-                  🔴 Red Win Prob:{" "}
+                  Red Win Prob:{" "}
                   {earlyGame.team_200_win_probability !== null
                     ? `${(earlyGame.team_200_win_probability * 100).toFixed(1)}%`
                     : "—"}

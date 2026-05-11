@@ -118,19 +118,19 @@ function sign(v: unknown) {
 }
 
 const ROLE_COLOR: Record<string, string> = {
-  TOP:     "#f59e0b",
-  JUNGLE:  "#22c55e",
-  MID:     "#818cf8",
-  MIDDLE:  "#818cf8",
-  BOTTOM:  "#38bdf8",
+  TOP:     "var(--warning-500)",
+  JUNGLE:  "var(--signal-lime-400)",
+  MID:     "var(--racing-blue-300)",
+  MIDDLE:  "var(--racing-blue-300)",
+  BOTTOM:  "var(--racing-blue-400)",
   SUPPORT: "#f472b6",
   UTILITY: "#f472b6",
 };
 
 const TIER_COLOR: Record<string, string> = {
-  S: "#16a34a",
-  A: "#f59e0b",
-  B: "#dc2626",
+  S: "var(--signal-lime-400)",
+  A: "var(--warning-500)",
+  B: "var(--danger-500)",
 };
 
 const ROLE_TO_MATCHUP_API: Record<string, string> = {
@@ -188,7 +188,12 @@ function TagBadge({ tag }: { tag: string }) {
 }
 
 function ConfidencePip({ level }: { level: string }) {
-  const c = level === "high" ? "#22c55e" : level === "medium" ? "#f59e0b" : "#ef4444";
+  const c =
+    level === "high"
+      ? "var(--signal-lime-400)"
+      : level === "medium"
+        ? "var(--warning-500)"
+        : "var(--danger-500)";
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, fontWeight: 600, color: c }}>
       <span style={{ width: 7, height: 7, borderRadius: "50%", background: c, display: "inline-block" }} />
@@ -214,13 +219,13 @@ function ChampionCard({
 }) {
   const borderMap: Record<CardVariant, string> = {
     "normal":   "1px solid var(--color-border, #334155)",
-    "my-pick":  "2px solid #6366f1",
-    "opponent": "2px solid #ef4444",
+    "my-pick":  "2px solid var(--racing-blue-500)",
+    "opponent": "2px solid var(--danger-500)",
   };
   const bgMap: Record<CardVariant, string> = {
     "normal":   "var(--color-surface, #0f172a)",
-    "my-pick":  "#1e1b4b",
-    "opponent": "#2d0a0a",
+    "my-pick":  "rgba(8, 125, 255, 0.16)",
+    "opponent": "rgba(255, 82, 104, 0.14)",
   };
 
   return (
@@ -240,7 +245,12 @@ function ChampionCard({
         width: "100%",
         textAlign: "center",
         transition: "border-color 0.15s, background 0.15s",
-        outline: variant === "my-pick" ? "2px solid #6366f1" : variant === "opponent" ? "2px solid #ef4444" : "none",
+        outline:
+          variant === "my-pick"
+            ? "2px solid var(--racing-blue-500)"
+            : variant === "opponent"
+              ? "2px solid var(--danger-500)"
+              : "none",
         outlineOffset: 1,
       }}
     >
@@ -249,9 +259,14 @@ function ChampionCard({
         height: 56,
         borderRadius: 8,
         overflow: "hidden",
-        background: "#1e293b",
+        background: "var(--color-surface-raised, #1e293b)",
         flexShrink: 0,
-        border: variant === "my-pick" ? "2px solid #6366f1" : variant === "opponent" ? "2px solid #ef4444" : "none",
+        border:
+          variant === "my-pick"
+            ? "2px solid var(--racing-blue-500)"
+            : variant === "opponent"
+              ? "2px solid var(--danger-500)"
+              : "none",
       }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -314,11 +329,11 @@ function DetailPanel({
           color: "var(--color-text-secondary, #94a3b8)", fontSize: 18, lineHeight: 1,
         }}
       >
-        ✕
+        Close
       </button>
 
       <div style={{ display: "flex", gap: 16, alignItems: "flex-start", marginBottom: 12 }}>
-        <div style={{ width: 80, height: 80, borderRadius: 12, overflow: "hidden", background: "#1e293b", flexShrink: 0 }}>
+        <div style={{ width: 80, height: 80, borderRadius: 12, overflow: "hidden", background: "var(--color-surface-raised, #1e293b)", flexShrink: 0 }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={detail.image_url} alt={detail.name} width={80} height={80} style={{ objectFit: "cover" }}
             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
@@ -413,20 +428,34 @@ function MatchupResultsPanel({
   if (loading) {
     return (
       <div className={styles.sectionCard} style={{ marginTop: 0 }}>
-        <p className={styles.statusInfo}>⚔️ Fetching matchup data…</p>
+        <p className={styles.statusInfo}>Fetching matchup data…</p>
       </div>
     );
   }
 
   const myWR  = result?.champ_a_win_rate ?? null;
   const oppWR = result?.champ_b_win_rate ?? null;
-  const myWRColor  = myWR  !== null ? (myWR  >= 0.55 ? "#22c55e" : myWR  <= 0.45 ? "#ef4444" : "#f59e0b") : "#94a3b8";
-  const oppWRColor = oppWR !== null ? (oppWR >= 0.55 ? "#ef4444" : oppWR <= 0.45 ? "#22c55e" : "#f59e0b") : "#94a3b8";
+  const myWRColor =
+    myWR !== null
+      ? myWR >= 0.55
+        ? "var(--signal-lime-400)"
+        : myWR <= 0.45
+          ? "var(--danger-500)"
+          : "var(--warning-500)"
+      : "var(--color-text-secondary)";
+  const oppWRColor =
+    oppWR !== null
+      ? oppWR >= 0.55
+        ? "var(--danger-500)"
+        : oppWR <= 0.45
+          ? "var(--signal-lime-400)"
+          : "var(--warning-500)"
+      : "var(--color-text-secondary)";
 
   return (
     <div className={styles.sectionCard} style={{ marginTop: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-        <h2 className={styles.sectionTitle} style={{ margin: 0 }}>⚔️ Matchup Results</h2>
+        <h2 className={styles.sectionTitle} style={{ margin: 0 }}>Matchup Results</h2>
         <button
           type="button"
           onClick={onReset}
@@ -448,7 +477,7 @@ function MatchupResultsPanel({
         background: "var(--color-surface-raised, #1e293b)", borderRadius: 12,
       }}>
         <div style={{ textAlign: "center" }}>
-          <div style={{ width: 72, height: 72, borderRadius: 10, overflow: "hidden", margin: "0 auto 8px", border: "2px solid #6366f1" }}>
+          <div style={{ width: 72, height: 72, borderRadius: 10, overflow: "hidden", margin: "0 auto 8px", border: "2px solid var(--racing-blue-500)" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={myChamp.image_url} alt={myChamp.name} width={72} height={72} style={{ objectFit: "cover" }} />
           </div>
@@ -459,10 +488,10 @@ function MatchupResultsPanel({
           )}
         </div>
 
-        <div style={{ fontSize: 28, fontWeight: 900, color: "#ef4444", textShadow: "0 0 12px #ef444466" }}>VS</div>
+        <div style={{ fontSize: 28, fontWeight: 900, color: "var(--danger-500)", textShadow: "0 0 12px rgba(255, 82, 104, 0.4)" }}>VS</div>
 
         <div style={{ textAlign: "center" }}>
-          <div style={{ width: 72, height: 72, borderRadius: 10, overflow: "hidden", margin: "0 auto 8px", border: "2px solid #ef4444" }}>
+          <div style={{ width: 72, height: 72, borderRadius: 10, overflow: "hidden", margin: "0 auto 8px", border: "2px solid var(--danger-500)" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={oppChamp.image_url} alt={oppChamp.name} width={72} height={72} style={{ objectFit: "cover" }} />
           </div>
@@ -506,7 +535,7 @@ function MatchupResultsPanel({
             {result.avg_kda_diff !== null && (
               <article className={styles.kpiCard}>
                 <p className={styles.kpiLabel}>KDA Diff</p>
-                <strong className={styles.kpiValue} style={{ color: result.avg_kda_diff >= 0 ? "#22c55e" : "#ef4444" }}>
+                <strong className={styles.kpiValue} style={{ color: result.avg_kda_diff >= 0 ? "var(--signal-lime-400)" : "var(--danger-500)" }}>
                   {sign(result.avg_kda_diff)}
                 </strong>
               </article>
@@ -514,7 +543,7 @@ function MatchupResultsPanel({
             {result.avg_kill_diff !== null && (
               <article className={styles.kpiCard}>
                 <p className={styles.kpiLabel}>Kill Diff</p>
-                <strong className={styles.kpiValue} style={{ color: result.avg_kill_diff >= 0 ? "#22c55e" : "#ef4444" }}>
+                <strong className={styles.kpiValue} style={{ color: result.avg_kill_diff >= 0 ? "var(--signal-lime-400)" : "var(--danger-500)" }}>
                   {sign(result.avg_kill_diff)}
                 </strong>
               </article>
@@ -522,7 +551,7 @@ function MatchupResultsPanel({
             {result.avg_gold_diff_per_min !== null && (
               <article className={styles.kpiCard}>
                 <p className={styles.kpiLabel}>Gold/Min Diff</p>
-                <strong className={styles.kpiValue} style={{ color: result.avg_gold_diff_per_min >= 0 ? "#22c55e" : "#ef4444" }}>
+                <strong className={styles.kpiValue} style={{ color: result.avg_gold_diff_per_min >= 0 ? "var(--signal-lime-400)" : "var(--danger-500)" }}>
                   {sign(result.avg_gold_diff_per_min)}
                 </strong>
               </article>
@@ -540,8 +569,8 @@ function MatchupResultsPanel({
       {/* Counters + Favors grid */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 8 }}>
         <div>
-          <h3 className={styles.sectionTitle} style={{ fontSize: 13, marginBottom: 8, color: "#ef4444" }}>
-            🔻 {myChamp.name}&apos;s Counters
+          <h3 className={styles.sectionTitle} style={{ fontSize: 13, marginBottom: 8, color: "var(--danger-500)" }}>
+            {myChamp.name}&apos;s Counters
           </h3>
           {counters.length === 0 ? (
             <p style={{ fontSize: 12, color: "#64748b" }}>No counter data available.</p>
@@ -554,7 +583,7 @@ function MatchupResultsPanel({
                     display: "flex", alignItems: "center", gap: 8,
                     padding: "6px 10px",
                     background: "var(--color-surface-raised, #1e293b)",
-                    borderRadius: 8, border: "1px solid #334155",
+                    borderRadius: 8, border: "1px solid var(--color-border)",
                   }}>
                     {cChamp && (
                       <div style={{ width: 32, height: 32, borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
@@ -568,7 +597,7 @@ function MatchupResultsPanel({
                       </strong>
                       <RoleBadge role={c.role} />
                     </div>
-                    <strong style={{ fontSize: 13, color: "#ef4444", flexShrink: 0 }}>{pct(c.counter_win_rate)}</strong>
+                    <strong style={{ fontSize: 13, color: "var(--danger-500)", flexShrink: 0 }}>{pct(c.counter_win_rate)}</strong>
                   </div>
                 );
               })}
@@ -577,8 +606,8 @@ function MatchupResultsPanel({
         </div>
 
         <div>
-          <h3 className={styles.sectionTitle} style={{ fontSize: 13, marginBottom: 8, color: "#22c55e" }}>
-            ✅ {myChamp.name}&apos;s Favors
+          <h3 className={styles.sectionTitle} style={{ fontSize: 13, marginBottom: 8, color: "var(--signal-lime-400)" }}>
+            {myChamp.name}&apos;s Favors
           </h3>
           {favors.length === 0 ? (
             <p style={{ fontSize: 12, color: "#64748b" }}>No favorable matchup data available.</p>
@@ -591,7 +620,7 @@ function MatchupResultsPanel({
                     display: "flex", alignItems: "center", gap: 8,
                     padding: "6px 10px",
                     background: "var(--color-surface-raised, #1e293b)",
-                    borderRadius: 8, border: "1px solid #334155",
+                    borderRadius: 8, border: "1px solid var(--color-border)",
                   }}>
                     {fChamp && (
                       <div style={{ width: 32, height: 32, borderRadius: 6, overflow: "hidden", flexShrink: 0 }}>
@@ -605,7 +634,7 @@ function MatchupResultsPanel({
                       </strong>
                       <RoleBadge role={f.role} />
                     </div>
-                    <strong style={{ fontSize: 13, color: "#22c55e", flexShrink: 0 }}>{pct(f.our_win_rate)}</strong>
+                    <strong style={{ fontSize: 13, color: "var(--signal-lime-400)", flexShrink: 0 }}>{pct(f.our_win_rate)}</strong>
                   </div>
                 );
               })}
@@ -789,7 +818,7 @@ export default function ChampionsPage() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <div>
             <h3 className={styles.sectionTitle} style={{ margin: 0, fontSize: 14 }}>
-              {matchupMode ? "⚔️ Matchup Mode Active" : "🗂️ Browse Mode"}
+              {matchupMode ? "Matchup Mode Active" : "Browse Mode"}
             </h3>
             {matchupMode && (
               <p style={{ margin: "4px 0 0", fontSize: 12, color: "#94a3b8" }}>{stepLabel}</p>
@@ -815,13 +844,14 @@ export default function ChampionsPage() {
                 type="button"
                 onClick={enterMatchupMode}
                 style={{
-                  padding: "8px 22px", borderRadius: 8, border: "none",
-                  background: "linear-gradient(135deg, #6366f1 0%, #ef4444 100%)",
+                  padding: "8px 22px", borderRadius: 8,
+                  border: "1px solid rgba(116, 199, 255, 0.58)",
+                  background: "var(--racing-blue-500)",
                   color: "#fff", cursor: "pointer", fontWeight: 700, fontSize: 13,
-                  letterSpacing: "0.02em", boxShadow: "0 2px 12px #6366f140",
+                  letterSpacing: "0.02em", boxShadow: "0 12px 28px rgba(8, 125, 255, 0.24)",
                 }}
               >
-                ⚔️ Begin Matchup Mode
+                Begin Matchup Mode
               </button>
             )}
           </div>
@@ -903,30 +933,30 @@ export default function ChampionsPage() {
               <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
                 <div style={{
                   padding: "4px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700,
-                  background: matchupStep === "pick-my" ? "#6366f1" : "#334155", color: "#fff",
+                  background: matchupStep === "pick-my" ? "var(--racing-blue-500)" : "var(--carbon-700)", color: "#fff",
                 }}>
-                  1. Your Champion {myChamp ? `✓ ${myChamp.name}` : ""}
+                  1. Your Champion {myChamp ? `Selected: ${myChamp.name}` : ""}
                 </div>
                 <span style={{ color: "#64748b", fontSize: 12 }}>→</span>
                 <div style={{
                   padding: "4px 14px", borderRadius: 20, fontSize: 12, fontWeight: 700,
-                  background: matchupStep === "pick-opp" ? "#ef4444" : "#334155", color: "#fff",
+                  background: matchupStep === "pick-opp" ? "var(--danger-500)" : "var(--carbon-700)", color: "#fff",
                 }}>
-                  2. Opponent {oppChamp ? `✓ ${oppChamp.name}` : ""}
+                  2. Opponent {oppChamp ? `Selected: ${oppChamp.name}` : ""}
                 </div>
               </div>
 
               {/* Instruction banner */}
               <div style={{
                 padding: "10px 14px", borderRadius: 8, marginBottom: 14,
-                background: matchupStep === "pick-my" ? "#1e1b4b" : "#2d0a0a",
-                border: `1px solid ${matchupStep === "pick-my" ? "#6366f1" : "#ef4444"}`,
+                background: matchupStep === "pick-my" ? "rgba(8, 125, 255, 0.16)" : "rgba(255, 82, 104, 0.14)",
+                border: `1px solid ${matchupStep === "pick-my" ? "var(--racing-blue-500)" : "var(--danger-500)"}`,
                 fontSize: 13, fontWeight: 600,
-                color: matchupStep === "pick-my" ? "#a5b4fc" : "#fca5a5",
+                color: matchupStep === "pick-my" ? "var(--racing-blue-300)" : "#ffb5bf",
               }}>
                 {matchupStep === "pick-my"
-                  ? "👆 Click your champion — the one you are playing"
-                  : `👆 Click the opponent champion you will face as ${myChamp?.name}`}
+                  ? "Click your champion — the one you are playing"
+                  : `Click the opponent champion you will face as ${myChamp?.name}`}
               </div>
 
               <p style={{ fontSize: 11, color: "#64748b", margin: "0 0 10px" }}>

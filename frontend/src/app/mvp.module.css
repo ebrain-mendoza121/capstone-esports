@@ -1,11 +1,8 @@
 .page {
   min-height: 100vh;
   position: relative;
-  background:
-    radial-gradient(circle at 8% 2%, rgba(255, 176, 73, 0.2), transparent 28%),
-    radial-gradient(circle at 88% 7%, rgba(38, 212, 183, 0.14), transparent 34%),
-    linear-gradient(145deg, #070b1d 0%, #0f1735 52%, #08112f 100%);
-  color: #eef0ff;
+  background: var(--carbon-950);
+  color: var(--mist-100);
   overflow: hidden;
 }
 
@@ -15,8 +12,8 @@
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(244, 247, 251, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(244, 247, 251, 0.028) 1px, transparent 1px);
   background-size: 42px 42px;
   mask-image: radial-gradient(circle at center, black 40%, transparent 100%);
 }
@@ -32,13 +29,13 @@
 }
 
 .hero {
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(116, 199, 255, 0.2);
   border-radius: 22px;
   padding: 22px;
   background:
-    linear-gradient(150deg, rgba(15, 24, 56, 0.9), rgba(9, 16, 39, 0.8)),
-    radial-gradient(circle at 94% 8%, rgba(255, 176, 73, 0.16), transparent 42%);
-  box-shadow: 0 22px 62px rgba(7, 10, 24, 0.46);
+    linear-gradient(150deg, rgba(23, 29, 36, 0.94), rgba(13, 17, 22, 0.88)),
+    radial-gradient(circle at 94% 8%, rgba(8, 125, 255, 0.1), transparent 42%);
+  box-shadow: 0 22px 62px rgba(0, 0, 0, 0.48);
   animation: popIn 520ms var(--ease-main);
 }
 
@@ -46,7 +43,7 @@
   font-size: 0.72rem;
   letter-spacing: 0.13em;
   text-transform: uppercase;
-  color: rgba(243, 244, 239, 0.7);
+  color: rgba(174, 184, 197, 0.86);
 }
 
 .title {
@@ -54,12 +51,12 @@
   font-family: var(--font-display);
   font-size: clamp(2rem, 3.8vw, 3.4rem);
   line-height: 0.95;
-  color: #fffdf3;
+  color: var(--mist-100);
 }
 
 .subtitle {
   margin-top: 10px;
-  color: rgba(243, 244, 239, 0.78);
+  color: rgba(244, 247, 251, 0.78);
   max-width: 70ch;
 }
 
@@ -83,9 +80,9 @@
 }
 
 .section {
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(116, 199, 255, 0.16);
   border-radius: 18px;
-  background: rgba(10, 17, 40, 0.76);
+  background: rgba(17, 22, 28, 0.78);
   backdrop-filter: blur(5px);
   padding: 14px;
 }
@@ -100,12 +97,12 @@
 
 .sectionTitle {
   font-size: 1.08rem;
-  color: #fffef8;
+  color: var(--mist-100);
 }
 
 .sectionCopy {
   margin-top: 2px;
-  color: rgba(243, 244, 239, 0.72);
+  color: rgba(244, 247, 251, 0.72);
   font-size: 0.86rem;
 }
 
@@ -130,7 +127,7 @@
 .field {
   display: grid;
   gap: 6px;
-  color: rgba(243, 244, 239, 0.78);
+  color: rgba(244, 247, 251, 0.78);
   font-size: 0.76rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -140,7 +137,7 @@
 .select {
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.22);
-  background: rgba(8, 13, 30, 0.86);
+  background: rgba(7, 9, 12, 0.86);
   color: #f6f8ff;
   padding: 10px;
 }
@@ -148,8 +145,8 @@
 .input:focus,
 .select:focus {
   outline: none;
-  border-color: var(--teal-500);
-  box-shadow: 0 0 0 3px rgba(38, 212, 183, 0.24);
+  border-color: var(--racing-blue-500);
+  box-shadow: 0 0 0 3px rgba(8, 125, 255, 0.22);
 }
 
 .buttonPrimary,
@@ -164,23 +161,24 @@
 
 .buttonPrimary,
 .linkChip {
-  border: none;
-  background: linear-gradient(120deg, var(--teal-500), var(--amber-500));
-  color: #08112c;
+  border: 1px solid rgba(116, 199, 255, 0.58);
+  background: var(--racing-blue-500);
+  color: #ffffff;
   cursor: pointer;
+  box-shadow: 0 12px 28px rgba(8, 125, 255, 0.22);
 }
 
 .buttonGhost {
-  border: 1px solid rgba(255, 255, 255, 0.26);
+  border: 1px solid rgba(116, 199, 255, 0.3);
   color: #f4f6ff;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(32, 40, 50, 0.74);
 }
 
 .buttonPrimary:hover,
 .buttonGhost:hover,
 .linkChip:hover {
   transform: translateY(-1px);
-  filter: saturate(1.05);
+  filter: brightness(1.08);
 }
 
 .kpiGrid {
@@ -190,12 +188,12 @@
 }
 
 .kpiCard {
-  border: 1px solid rgba(255, 255, 255, 0.17);
+  border: 1px solid rgba(116, 199, 255, 0.17);
   border-radius: 14px;
   padding: 11px;
   background:
-    linear-gradient(145deg, rgba(17, 28, 64, 0.92), rgba(10, 17, 40, 0.82)),
-    radial-gradient(circle at 95% 10%, rgba(255, 176, 73, 0.16), transparent 46%);
+    linear-gradient(145deg, rgba(23, 29, 36, 0.94), rgba(13, 17, 22, 0.86)),
+    radial-gradient(circle at 95% 10%, rgba(8, 125, 255, 0.1), transparent 46%);
 }
 
 .kpiLabel {
@@ -221,7 +219,7 @@
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 14px;
   padding: 12px;
-  background: rgba(9, 15, 36, 0.74);
+  background: rgba(17, 22, 28, 0.76);
 }
 
 .tableWrap {
@@ -284,13 +282,13 @@
 }
 
 .badge {
-  background: rgba(255, 176, 73, 0.16);
-  color: #ffe3b8;
+  background: rgba(240, 200, 75, 0.16);
+  color: #fff1bf;
 }
 
 .badgeWin {
-  background: rgba(38, 212, 183, 0.18);
-  color: #d2fff7;
+  background: rgba(184, 255, 69, 0.16);
+  color: #efffc7;
 }
 
 .badgeLoss {
@@ -350,7 +348,7 @@
 .barFill {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, var(--teal-500), var(--amber-500));
+  background: var(--racing-blue-500);
 }
 
 .notice,
@@ -361,9 +359,9 @@
 }
 
 .notice {
-  border: 1px solid rgba(255, 176, 73, 0.4);
-  background: rgba(255, 176, 73, 0.11);
-  color: #ffe4bc;
+  border: 1px solid rgba(240, 200, 75, 0.42);
+  background: rgba(240, 200, 75, 0.11);
+  color: #fff1bf;
 }
 
 .error {

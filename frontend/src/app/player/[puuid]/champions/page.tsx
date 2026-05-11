@@ -18,8 +18,8 @@ function winRateCellStyle(winRate: number | null): React.CSSProperties {
   if (winRate === null) return {};
   if (winRate > 0.55)
     return {
-      background: "rgba(38, 212, 183, 0.18)",
-      color: "#d2fff7",
+      background: "rgba(184, 255, 69, 0.16)",
+      color: "#efffc7",
       borderRadius: 6,
       padding: "2px 8px",
       display: "inline-block",

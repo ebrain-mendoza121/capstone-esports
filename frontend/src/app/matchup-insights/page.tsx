@@ -29,10 +29,10 @@ function WinBar({ blueProb, redProb }: { blueProb: number; redProb: number }) {
   const blueWidth = Math.round(blueProb * 100);
   return (
     <div style={{ display: "flex", borderRadius: 8, overflow: "hidden", height: 32, marginTop: 12 }}>
-      <div style={{ width: `${blueWidth}%`, background: "var(--color-win, #22c55e)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14 }}>
+      <div style={{ width: `${blueWidth}%`, background: "var(--color-win)", display: "flex", alignItems: "center", justifyContent: "center", color: "#061014", fontWeight: 700, fontSize: 14 }}>
         Blue {(blueProb * 100).toFixed(1)}%
       </div>
-      <div style={{ width: `${100 - blueWidth}%`, background: "var(--color-loss, #ef4444)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14 }}>
+      <div style={{ width: `${100 - blueWidth}%`, background: "var(--color-loss)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14 }}>
         Red {(redProb * 100).toFixed(1)}%
       </div>
     </div>
@@ -59,9 +59,9 @@ function RoleMatchupRow({ m }: { m: RoleMatchup }) {
 }
 
 function RoleFitBadge({ fit }: { fit: string }) {
-  if (fit === "native")   return <span className={styles.badgeWin} style={{ fontSize: "0.72rem" }}>✓ native</span>;
+  if (fit === "native")   return <span className={styles.badgeWin} style={{ fontSize: "0.72rem" }}>native</span>;
   if (fit === "flex")     return <span className={styles.badge}    style={{ fontSize: "0.72rem" }}>~ flex</span>;
-  if (fit === "off-meta") return <span className={styles.badgeLoss} style={{ fontSize: "0.72rem" }}>⚠ off-meta</span>;
+  if (fit === "off-meta") return <span className={styles.badgeLoss} style={{ fontSize: "0.72rem" }}>off-meta</span>;
   return null;
 }
 
@@ -95,7 +95,7 @@ function MiniRecCard({ player, side }: { player: TeamPlayerResult; side: "blue" 
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <strong style={{ fontSize: "0.82rem" }}>{r.champion_name}</strong>
             {r.playstyle_match && (
-              <span className={fitBadge} style={{ fontSize: "0.65rem" }}>✓ fits playstyle</span>
+              <span className={fitBadge} style={{ fontSize: "0.65rem" }}>fits playstyle</span>
             )}
           </div>
           <span style={{ fontSize: "0.7rem", opacity: 0.7 }}>
@@ -129,13 +129,13 @@ function ChampionPicksMatchup({
         <table className={styles.table}>
           <thead>
             <tr>
-              <th style={{ color: "var(--color-win, #22c55e)", textAlign: "left" }}>Blue</th>
+              <th style={{ color: "var(--color-win)", textAlign: "left" }}>Blue</th>
               <th>Role</th>
               <th>Champion</th>
               <th>Type</th>
               <th>Fit</th>
               <th style={{ width: 32, textAlign: "center" }}></th>
-              <th style={{ color: "var(--color-loss, #ef4444)", textAlign: "right" }}>Red</th>
+              <th style={{ color: "var(--color-loss)", textAlign: "right" }}>Red</th>
               <th style={{ textAlign: "right" }}>Role</th>
               <th style={{ textAlign: "right" }}>Champion</th>
               <th style={{ textAlign: "right" }}>Type</th>
@@ -163,7 +163,7 @@ function ChampionPicksMatchup({
                     {blueChamp ? (
                       <strong>{blueChamp.name}</strong>
                     ) : blueRec ? (
-                      <span style={{ opacity: 0.6, fontStyle: "italic" }}>💡 {blueRec.champion_name}</span>
+                      <span style={{ opacity: 0.6, fontStyle: "italic" }}>{blueRec.champion_name}</span>
                     ) : (
                       <span className={styles.emptyState}>—</span>
                     )}
@@ -191,7 +191,7 @@ function ChampionPicksMatchup({
                     {redChamp ? (
                       <strong>{redChamp.name}</strong>
                     ) : redRec ? (
-                      <span style={{ opacity: 0.6, fontStyle: "italic" }}>💡 {redRec.champion_name}</span>
+                      <span style={{ opacity: 0.6, fontStyle: "italic" }}>{redRec.champion_name}</span>
                     ) : (
                       <span className={styles.emptyState}>—</span>
                     )}
@@ -217,7 +217,7 @@ function ChampionPicksMatchup({
       {playersWithoutChampion.length > 0 && (
         <div style={{ marginTop: 20 }}>
           <h3 style={{ fontSize: "0.82rem", fontWeight: 600, opacity: 0.7, marginBottom: 12 }}>
-            💡 AI Champion Suggestions (players without a pick)
+            AI Champion Suggestions (players without a pick)
           </h3>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
             {playersWithoutChampion.map(({ p, side }, i) => (
@@ -240,8 +240,8 @@ function CounterFlagsSection({ flags }: { flags: ChampionMatchupFlag[] }) {
       <h2 className={styles.sectionTitle}>Champion Matchup Counter Intel</h2>
       {favorable.length > 0 && (
         <>
-          <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8, color: "var(--color-win, #22c55e)" }}>
-            ✓ Favorable for Blue
+          <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8, color: "var(--color-win)" }}>
+            Favorable for Blue
           </h3>
           <ul className={styles.bulletList} style={{ marginBottom: 16 }}>
             {favorable.map((f, i) => (
@@ -258,8 +258,8 @@ function CounterFlagsSection({ flags }: { flags: ChampionMatchupFlag[] }) {
       )}
       {unfavorable.length > 0 && (
         <>
-          <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8, color: "var(--color-loss, #ef4444)" }}>
-            ⚠ Unfavorable for Blue
+          <h3 style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: 8, color: "var(--color-loss)" }}>
+            Unfavorable for Blue
           </h3>
           <ul className={styles.bulletList}>
             {unfavorable.map((f, i) => (
@@ -495,7 +495,7 @@ export default function MatchupInsightsPage() {
                 <h3>Blue Team — {result.blue_team.composition_archetype}</h3>
                 {result.blue_team.team_dna && (
                   <p className={styles.sectionText}>
-                    {result.blue_team.team_dna.emoji} {result.blue_team.team_dna.label} — {result.blue_team.team_dna.tagline}
+                    {result.blue_team.team_dna.label} — {result.blue_team.team_dna.tagline}
                   </p>
                 )}
                 <MiniPlayerTable players={result.blue_team.players} />
@@ -528,7 +528,7 @@ export default function MatchupInsightsPage() {
                 <h3>Red Team — {result.red_team.composition_archetype}</h3>
                 {result.red_team.team_dna && (
                   <p className={styles.sectionText}>
-                    {result.red_team.team_dna.emoji} {result.red_team.team_dna.label} — {result.red_team.team_dna.tagline}
+                    {result.red_team.team_dna.label} — {result.red_team.team_dna.tagline}
                   </p>
                 )}
                 <MiniPlayerTable players={result.red_team.players} />

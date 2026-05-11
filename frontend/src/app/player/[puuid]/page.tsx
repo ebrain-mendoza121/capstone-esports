@@ -124,7 +124,7 @@ export default function PlayerDashboardPage() {
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" style={{ animation: "spin 1s linear infinite" }}>
               <style>{"@keyframes spin { to { transform: rotate(360deg); } }"}</style>
               <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.15)" strokeWidth="3" />
-              <path d="M12 2a10 10 0 0 1 10 10" stroke="#26d4b7" strokeWidth="3" strokeLinecap="round" />
+              <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--racing-blue-400)" strokeWidth="3" strokeLinecap="round" />
             </svg>
             <p className={styles.loading}>
               Fetching {ingestGameName ? `${ingestGameName}#${ingestTagLine}` : "player"}’s match data from Riot…
@@ -163,10 +163,10 @@ export default function PlayerDashboardPage() {
                 </span>
               )}
               <Link className={styles.linkChip} href={`/player/${puuid}/trends`}>
-                📈 Performance Trends
+                Performance Trends
               </Link>
               <Link className={styles.linkChip} href={`/player/${puuid}/champions`}>
-                🏆 Champion Stats
+                Champion Stats
               </Link>
               <Link className={`${styles.buttonPrimary} ${styles.heroAction}`} href="/individual-stats">
                 Back to Individual Stats
@@ -289,11 +289,11 @@ export default function PlayerDashboardPage() {
                         </span>
                       </td>
                       <td>{row.avg_kda.toFixed(2)}</td>
-                      <td style={{ color: row.vs_peers.kda_delta >= 0 ? "var(--color-win, #22c55e)" : "var(--color-loss, #ef4444)" }}>
+                      <td style={{ color: row.vs_peers.kda_delta >= 0 ? "var(--color-win)" : "var(--color-loss)" }}>
                         {delta(row.vs_peers.kda_delta)}
                       </td>
                       <td>{row.avg_cs_per_min.toFixed(2)}</td>
-                      <td style={{ color: row.vs_peers.cs_delta >= 0 ? "var(--color-win, #22c55e)" : "var(--color-loss, #ef4444)" }}>
+                      <td style={{ color: row.vs_peers.cs_delta >= 0 ? "var(--color-win)" : "var(--color-loss)" }}>
                         {delta(row.vs_peers.cs_delta)}
                       </td>
                       <td>{pct(row.avg_kill_part)}</td>
@@ -433,7 +433,7 @@ export default function PlayerDashboardPage() {
                       <td>{rec.games_played}</td>
                       <td>
                         {rec.playstyle_match
-                          ? <span className={styles.badgeWin}>✓ Match</span>
+                          ? <span className={styles.badgeWin}>Match</span>
                           : <span className={styles.badge}>—</span>}
                       </td>
                     </tr>

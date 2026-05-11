@@ -39,8 +39,8 @@ function trendArrow(slope: number) {
   return "→";
 }
 function trendColor(slope: number) {
-  if (slope > 0.01) return "var(--color-win, #22c55e)";
-  if (slope < -0.01) return "var(--color-loss, #ef4444)";
+  if (slope > 0.01) return "var(--color-win)";
+  if (slope < -0.01) return "var(--color-loss)";
   return "#8899bb";
 }
 function streakLabel(streak: number) {
@@ -49,24 +49,24 @@ function streakLabel(streak: number) {
   return "—";
 }
 function streakColor(streak: number) {
-  if (streak > 0) return "var(--color-win, #22c55e)";
-  if (streak < 0) return "var(--color-loss, #ef4444)";
+  if (streak > 0) return "var(--color-win)";
+  if (streak < 0) return "var(--color-loss)";
   return "#8899bb";
 }
 
 // ── Recharts shared config ─────────────────────────────────────────────────
 
 const CHART_COLORS = {
-  kda:              "#1fadff",
-  cs:               "#a78bfa",
-  kp:               "#34d399",
-  gold:             "#fbbf24",
-  win:              "#22c55e",
-  loss:             "#ef4444",
+  kda:              "var(--racing-blue-400)",
+  cs:               "var(--racing-blue-300)",
+  kp:               "var(--signal-lime-400)",
+  gold:             "var(--warning-500)",
+  win:              "var(--color-win)",
+  loss:             "var(--color-loss)",
   grid:             "rgba(255,255,255,0.06)",
   axis:             "rgba(255,255,255,0.35)",
-  tooltip_bg:       "#0d1b3e",
-  tooltip_border:   "rgba(255,255,255,0.12)",
+  tooltip_bg:       "var(--carbon-900)",
+  tooltip_border:   "var(--color-border)",
 };
 
 const CHART_STYLE = { fontSize: 11, fill: CHART_COLORS.axis };
@@ -251,7 +251,7 @@ function GameRow({ g }: { g: TrendGamePoint }) {
   return (
     <tr>
       <td>
-        <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: g.win ? "var(--color-win,#22c55e)" : "var(--color-loss,#ef4444)", marginRight: 6 }} />
+        <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: g.win ? "var(--color-win)" : "var(--color-loss)", marginRight: 6 }} />
         {g.win ? "Win" : "Loss"}
       </td>
       <td>{date}</td>

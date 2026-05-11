@@ -171,7 +171,7 @@ export default function IndividualStatsPage() {
           </div>
 
           <div className={styles.inlineActionRow}>
-            <button className={styles.buttonPrimary} type="submit" disabled={submitting}>
+            <button className={`${styles.buttonPrimary} ${styles.ingestButton}`} type="submit" disabled={submitting}>
               {submitting ? "Ingesting..." : "Ingest & Open Dashboard"}
             </button>
           </div>

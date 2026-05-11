@@ -11,7 +11,6 @@ import {
   PlayerRoleCode,
   TeamBuildResponse,
   TeamPlayerResult,
-  ChampionRecommendationSlim,
   requestTeamInsights,
 } from "@/lib/insightsApi";
 import useChampionOptions from "@/lib/useChampionOptions";
@@ -30,21 +29,13 @@ function ConfidenceBadge({ level }: { level: string }) {
   return <span className={cls}>{level}</span>;
 }
 
-const PLAYSTYLE_EMOJI: Record<string, string> = {
-  carry:           "🎯",
-  skirmisher:      "⚔️",
-  support_utility: "🛡️",
-  farm_efficiency: "🌾",
-};
-
 function PlaystyleBadge({ label }: { label: string | null }) {
   if (!label || label === "unknown" || label === "insufficient_data") {
     return <span className={styles.badge}>—</span>;
   }
-  const emoji = PLAYSTYLE_EMOJI[label] ?? "🔮";
   return (
     <span className={styles.badgeNeutral} title={`Recommended: ${label}`}>
-      {emoji} {label}
+      {label}
     </span>
   );
 }
@@ -64,7 +55,7 @@ function PlayerRow({ p }: { p: TeamPlayerResult }) {
             style={{ marginLeft: 6, fontSize: "0.75em" }}
             title={`Better fit: ${p.playstyle_recommended_roles.join(" / ")}`}
           >
-            ⚠️ mismatch
+            mismatch
           </span>
         )}
       </td>
@@ -82,9 +73,9 @@ function PlayerRow({ p }: { p: TeamPlayerResult }) {
 }
 
 function RoleFitBadge({ fit }: { fit: string }) {
-  if (fit === "native")   return <span className={styles.badgeWin}>✓ native</span>;
+  if (fit === "native")   return <span className={styles.badgeWin}>native</span>;
   if (fit === "flex")     return <span className={styles.badge}>~ flex</span>;
-  if (fit === "off-meta") return <span className={styles.badgeLoss}>⚠ off-meta</span>;
+  if (fit === "off-meta") return <span className={styles.badgeLoss}>off-meta</span>;
   return <span className={styles.badge}>—</span>;
 }
 
@@ -131,7 +122,7 @@ function ChampionPickCard({ player }: { player: TeamPlayerResult }) {
           {recs.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               <p style={{ margin: 0, fontSize: "0.68rem", textTransform: "uppercase", opacity: 0.5 }}>
-                💡 AI Suggestions
+                AI Suggestions
               </p>
               {recs.map((r, i) => (
                 <div
@@ -148,7 +139,7 @@ function ChampionPickCard({ player }: { player: TeamPlayerResult }) {
                   <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                     <strong style={{ fontSize: "0.83rem" }}>{r.champion_name}</strong>
                     {r.playstyle_match && (
-                      <span className={styles.badgeWin} style={{ fontSize: "0.65rem" }}>✓ playstyle</span>
+                      <span className={styles.badgeWin} style={{ fontSize: "0.65rem" }}>playstyle</span>
                     )}
                   </div>
                   <span style={{ fontSize: "0.7rem", opacity: 0.7 }}>
@@ -271,7 +262,7 @@ export default function TeamInsightsPage() {
               </span>
               {result.team_dna && (
                 <span className={styles.badge}>
-                  {result.team_dna.emoji} {result.team_dna.label} — {result.team_dna.tagline}
+                  {result.team_dna.label} — {result.team_dna.tagline}
                 </span>
               )}
               {result.predicted_carry && (
@@ -401,8 +392,8 @@ export default function TeamInsightsPage() {
                         <td>
                           {hasPlaystyle
                             ? p.role_mismatch
-                              ? <span className={styles.badgeLoss}>⚠️ Mismatch</span>
-                              : <span className={styles.badgeWin}>✓ Aligned</span>
+                              ? <span className={styles.badgeLoss}>Mismatch</span>
+                              : <span className={styles.badgeWin}>Aligned</span>
                             : <span className={styles.badge}>—</span>}
                         </td>
                       </tr>
@@ -416,7 +407,7 @@ export default function TeamInsightsPage() {
             {result.playstyle_warnings && result.playstyle_warnings.length > 0 && (
               <div style={{ marginTop: 16 }}>
                 <h3 style={{ marginBottom: 8, fontSize: "0.9rem", fontWeight: 600 }}>
-                  ⚠️ Composition Warnings
+                  Composition Warnings
                 </h3>
                 <ul className={styles.bulletList}>
                   {result.playstyle_warnings.map((w, i) => (
