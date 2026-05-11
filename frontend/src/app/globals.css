@@ -17,8 +17,8 @@
   --radius-m: 16px;
   --radius-s: 12px;
   --ease-main: 280ms cubic-bezier(0.22, 1, 0.36, 1);
-  --font-display: "Bodoni Moda", "Didot", "Bodoni MT", "Times New Roman", serif;
-  --font-body: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+  --font-display: var(--font-chakra-petch), "Eurostile", "Arial Narrow", sans-serif;
+  --font-body: var(--font-ibm-plex-sans), "Avenir Next", "Segoe UI", sans-serif;
 }
 
 html,
@@ -29,6 +29,7 @@ body {
 
 body {
   font-family: var(--font-body);
+  font-variant-numeric: tabular-nums;
   color: #e8ebff;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
