@@ -229,9 +229,9 @@ function WinLossChart({ series }: { series: TrendGamePoint[] }) {
           <XAxis dataKey="date" tick={CHART_STYLE} tickLine={false} axisLine={false} interval="preserveStartEnd" />
           <YAxis hide domain={[-1.5, 1.5]} />
           <Tooltip
-            content={({ active, payload }: { active?: boolean; payload?: readonly WinLossTooltipEntry[] }) => {
+            content={({ active, payload }) => {
               if (!active || !payload?.length) return null;
-              const d = payload[0].payload;
+              const d = (payload[0] as unknown as WinLossTooltipEntry).payload;
               return (
                 <div style={{ background: CHART_COLORS.tooltip_bg, border: `1px solid ${CHART_COLORS.tooltip_border}`, borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
                   <p style={{ margin: 0, color: d.win ? CHART_COLORS.win : CHART_COLORS.loss }}>
