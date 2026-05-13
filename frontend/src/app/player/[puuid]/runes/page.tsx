@@ -115,7 +115,7 @@ export default function RuneHistoryPage() {
             </div>
           </div>
 
-          <div className={styles.tableWrap}>
+          <div className={`${styles.tableWrap} ${styles.dashboardDesktopOnly}`}>
             <table className={styles.table}>
               <thead>
                 <tr>
@@ -146,6 +146,47 @@ export default function RuneHistoryPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          <div className={styles.dashboardMobileList}>
+            {entries.map((entry) => (
+              <article className={styles.dashboardMobileCard} key={entry.match_id}>
+                <div className={styles.dashboardMobileHeader}>
+                  <strong>{entry.champion}</strong>
+                  <span className={styles.badge}>{entry.keystone_name}</span>
+                </div>
+                <div className={styles.dashboardMetricGrid}>
+                  <div>
+                    <span>Primary Path</span>
+                    <strong>{entry.primary_style_name}</strong>
+                  </div>
+                  <div>
+                    <span>Primary Slot 1</span>
+                    <strong>{entry.primary_slot1_name}</strong>
+                  </div>
+                  <div>
+                    <span>Primary Slot 2</span>
+                    <strong>{entry.primary_slot2_name}</strong>
+                  </div>
+                  <div>
+                    <span>Primary Slot 3</span>
+                    <strong>{entry.primary_slot3_name}</strong>
+                  </div>
+                  <div>
+                    <span>Sub Path</span>
+                    <strong>{entry.sub_style_name}</strong>
+                  </div>
+                  <div>
+                    <span>Sub Slot 1</span>
+                    <strong>{entry.sub_slot1_name}</strong>
+                  </div>
+                  <div>
+                    <span>Sub Slot 2</span>
+                    <strong>{entry.sub_slot2_name}</strong>
+                  </div>
+                </div>
+              </article>
+            ))}
           </div>
         </section>
       </div>

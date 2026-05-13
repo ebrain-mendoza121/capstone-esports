@@ -116,6 +116,14 @@ export default function PlayerDashboardPage() {
     return entries.every((m) => m.trained);
   }, [modelsStatus]);
 
+  const objectiveRows = objControl
+    ? ([
+        { label: "Towers", win: objControl.avg_towers_when_winning, loss: objControl.avg_towers_when_losing },
+        { label: "Dragons", win: objControl.avg_dragons_when_winning, loss: objControl.avg_dragons_when_losing },
+        { label: "Barons", win: objControl.avg_barons_when_winning, loss: objControl.avg_barons_when_losing },
+      ] as const)
+    : [];
+
   if (ingesting) {
     return (
       <main className={styles.page}>
@@ -156,7 +164,7 @@ export default function PlayerDashboardPage() {
             <h1 className={`${styles.title} ${styles.heroTitle}`}>
               {player ? `${player.riot_id}#${player.tag_line}` : "Loading…"}
             </h1>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div className={styles.dashboardActions}>
               {modelsTrained !== null && (
                 <span className={modelsTrained ? styles.badgeWin : styles.badgeLoss}>
                   AI Models: {modelsTrained ? "Trained" : "Not Fully Trained"}
@@ -257,52 +265,108 @@ export default function PlayerDashboardPage() {
           ) : rolePerf.roles.length === 0 ? (
             <p className={styles.emptyState}>No role data yet — run backfill/derived first.</p>
           ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Role</th>
-                    <th>Games</th>
-                    <th>Win Rate</th>
-                    <th>vs Peers</th>
-                    <th>KDA</th>
-                    <th>KDA Δ</th>
-                    <th>CS/Min</th>
-                    <th>CS Δ</th>
-                    <th>Kill Part.</th>
-                    <th>Vision</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rolePerf.roles.map((row) => (
-                    <tr key={row.role}>
-                      <td><strong>{row.role}</strong></td>
-                      <td>{row.games_played}</td>
-                      <td>{pct(row.win_rate)}</td>
-                      <td>
-                        <span className={
-                          row.vs_peers.win_rate_vs_peers.startsWith("top")
-                            ? styles.badgeWin
-                            : styles.badgeLoss
-                        }>
-                          {row.vs_peers.win_rate_vs_peers}
-                        </span>
-                      </td>
-                      <td>{row.avg_kda.toFixed(2)}</td>
-                      <td style={{ color: row.vs_peers.kda_delta >= 0 ? "var(--color-win)" : "var(--color-loss)" }}>
-                        {delta(row.vs_peers.kda_delta)}
-                      </td>
-                      <td>{row.avg_cs_per_min.toFixed(2)}</td>
-                      <td style={{ color: row.vs_peers.cs_delta >= 0 ? "var(--color-win)" : "var(--color-loss)" }}>
-                        {delta(row.vs_peers.cs_delta)}
-                      </td>
-                      <td>{pct(row.avg_kill_part)}</td>
-                      <td>{row.avg_vision.toFixed(2)}</td>
+            <>
+              <div className={`${styles.tableWrap} ${styles.dashboardDesktopOnly}`}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Role</th>
+                      <th>Games</th>
+                      <th>Win Rate</th>
+                      <th>vs Peers</th>
+                      <th>KDA</th>
+                      <th>KDA Δ</th>
+                      <th>CS/Min</th>
+                      <th>CS Δ</th>
+                      <th>Kill Part.</th>
+                      <th>Vision</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {rolePerf.roles.map((row) => (
+                      <tr key={row.role}>
+                        <td><strong>{row.role}</strong></td>
+                        <td>{row.games_played}</td>
+                        <td>{pct(row.win_rate)}</td>
+                        <td>
+                          <span className={
+                            row.vs_peers.win_rate_vs_peers.startsWith("top")
+                              ? styles.badgeWin
+                              : styles.badgeLoss
+                          }>
+                            {row.vs_peers.win_rate_vs_peers}
+                          </span>
+                        </td>
+                        <td>{row.avg_kda.toFixed(2)}</td>
+                        <td style={{ color: row.vs_peers.kda_delta >= 0 ? "var(--color-win)" : "var(--color-loss)" }}>
+                          {delta(row.vs_peers.kda_delta)}
+                        </td>
+                        <td>{row.avg_cs_per_min.toFixed(2)}</td>
+                        <td style={{ color: row.vs_peers.cs_delta >= 0 ? "var(--color-win)" : "var(--color-loss)" }}>
+                          {delta(row.vs_peers.cs_delta)}
+                        </td>
+                        <td>{pct(row.avg_kill_part)}</td>
+                        <td>{row.avg_vision.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className={styles.dashboardMobileList}>
+                {rolePerf.roles.map((row) => (
+                  <article className={styles.dashboardMobileCard} key={row.role}>
+                    <div className={styles.dashboardMobileHeader}>
+                      <strong>{row.role}</strong>
+                      <span className={
+                        row.vs_peers.win_rate_vs_peers.startsWith("top")
+                          ? styles.badgeWin
+                          : styles.badgeLoss
+                      }>
+                        {row.vs_peers.win_rate_vs_peers}
+                      </span>
+                    </div>
+                    <div className={styles.dashboardMetricGrid}>
+                      <div>
+                        <span>Games</span>
+                        <strong>{row.games_played}</strong>
+                      </div>
+                      <div>
+                        <span>Win Rate</span>
+                        <strong>{pct(row.win_rate)}</strong>
+                      </div>
+                      <div>
+                        <span>KDA</span>
+                        <strong>{row.avg_kda.toFixed(2)}</strong>
+                      </div>
+                      <div>
+                        <span>KDA Delta</span>
+                        <strong style={{ color: row.vs_peers.kda_delta >= 0 ? "var(--color-win)" : "var(--color-loss)" }}>
+                          {delta(row.vs_peers.kda_delta)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>CS / Min</span>
+                        <strong>{row.avg_cs_per_min.toFixed(2)}</strong>
+                      </div>
+                      <div>
+                        <span>CS Delta</span>
+                        <strong style={{ color: row.vs_peers.cs_delta >= 0 ? "var(--color-win)" : "var(--color-loss)" }}>
+                          {delta(row.vs_peers.cs_delta)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Kill Part.</span>
+                        <strong>{pct(row.avg_kill_part)}</strong>
+                      </div>
+                      <div>
+                        <span>Vision</span>
+                        <strong>{row.avg_vision.toFixed(2)}</strong>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
           )}
         </section>
 
@@ -317,7 +381,7 @@ export default function PlayerDashboardPage() {
                 </p>
               </div>
             </div>
-            <div className={styles.tableWrap}>
+            <div className={`${styles.tableWrap} ${styles.dashboardDesktopOnly}`}>
               <table className={styles.table}>
                 <thead>
                   <tr>
@@ -328,11 +392,7 @@ export default function PlayerDashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {([
-                    { label: "Towers",  win: objControl.avg_towers_when_winning,  loss: objControl.avg_towers_when_losing },
-                    { label: "Dragons", win: objControl.avg_dragons_when_winning, loss: objControl.avg_dragons_when_losing },
-                    { label: "Barons",  win: objControl.avg_barons_when_winning,  loss: objControl.avg_barons_when_losing },
-                  ] as const).map(({ label, win, loss }) => {
+                  {objectiveRows.map(({ label, win, loss }) => {
                     const diff = win - loss;
                     return (
                       <tr key={label}>
@@ -353,6 +413,35 @@ export default function PlayerDashboardPage() {
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div className={styles.dashboardMobileList}>
+              {objectiveRows.map(({ label, win, loss }) => {
+                const diff = win - loss;
+                return (
+                  <article className={styles.dashboardMobileCard} key={label}>
+                    <div className={styles.dashboardMobileHeader}>
+                      <strong>{label}</strong>
+                      <span className={styles.badge}>Diff {diff >= 0 ? "+" : ""}{diff.toFixed(1)}</span>
+                    </div>
+                    <div className={styles.dashboardMetricGrid}>
+                      <div>
+                        <span>Avg When Winning</span>
+                        <strong style={{ color: "var(--color-win)" }}>{win.toFixed(1)}</strong>
+                      </div>
+                      <div>
+                        <span>Avg When Losing</span>
+                        <strong style={{ color: "var(--color-loss)" }}>{loss.toFixed(1)}</strong>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+              <article className={styles.dashboardMobileCard}>
+                <div className={styles.dashboardMobileHeader}>
+                  <strong>Dragon Soul Rate</strong>
+                  <span className={styles.badge}>{pct(objControl.dragon_soul_rate)}</span>
+                </div>
+              </article>
             </div>
           </section>
         )}
@@ -409,38 +498,74 @@ export default function PlayerDashboardPage() {
               No champion data yet — ingest more matches to populate recommendations.
             </p>
           ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Champion</th>
-                    <th>Role</th>
-                    <th>Score</th>
-                    <th>Win Rate</th>
-                    <th>Smoothed WR</th>
-                    <th>Games</th>
-                    <th>Playstyle Fit</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {champRecs.map((rec, idx) => (
-                    <tr key={`${rec.champion_name}-${rec.role ?? idx}`}>
-                      <td><strong>{rec.champion_name}</strong></td>
-                      <td>{rec.role ?? "—"}</td>
-                      <td>{(rec.score * 100).toFixed(1)}</td>
-                      <td>{pct(rec.win_rate)}</td>
-                      <td>{pct(rec.smoothed_win_rate)}</td>
-                      <td>{rec.games_played}</td>
-                      <td>
-                        {rec.playstyle_match
-                          ? <span className={styles.badgeWin}>Match</span>
-                          : <span className={styles.badge}>—</span>}
-                      </td>
+            <>
+              <div className={`${styles.tableWrap} ${styles.dashboardDesktopOnly}`}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Champion</th>
+                      <th>Role</th>
+                      <th>Score</th>
+                      <th>Win Rate</th>
+                      <th>Smoothed WR</th>
+                      <th>Games</th>
+                      <th>Playstyle Fit</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {champRecs.map((rec, idx) => (
+                      <tr key={`${rec.champion_name}-${rec.role ?? idx}`}>
+                        <td><strong>{rec.champion_name}</strong></td>
+                        <td>{rec.role ?? "—"}</td>
+                        <td>{(rec.score * 100).toFixed(1)}</td>
+                        <td>{pct(rec.win_rate)}</td>
+                        <td>{pct(rec.smoothed_win_rate)}</td>
+                        <td>{rec.games_played}</td>
+                        <td>
+                          {rec.playstyle_match
+                            ? <span className={styles.badgeWin}>Match</span>
+                            : <span className={styles.badge}>—</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className={styles.dashboardMobileList}>
+                {champRecs.map((rec, idx) => (
+                  <article className={styles.dashboardMobileCard} key={`${rec.champion_name}-${rec.role ?? idx}`}>
+                    <div className={styles.dashboardMobileHeader}>
+                      <strong>{rec.champion_name}</strong>
+                      <span className={rec.playstyle_match ? styles.badgeWin : styles.badge}>
+                        {rec.playstyle_match ? "Match" : "No fit"}
+                      </span>
+                    </div>
+                    <div className={styles.dashboardMetricGrid}>
+                      <div>
+                        <span>Role</span>
+                        <strong>{rec.role ?? "—"}</strong>
+                      </div>
+                      <div>
+                        <span>Score</span>
+                        <strong>{(rec.score * 100).toFixed(1)}</strong>
+                      </div>
+                      <div>
+                        <span>Win Rate</span>
+                        <strong>{pct(rec.win_rate)}</strong>
+                      </div>
+                      <div>
+                        <span>Smoothed WR</span>
+                        <strong>{pct(rec.smoothed_win_rate)}</strong>
+                      </div>
+                      <div>
+                        <span>Games</span>
+                        <strong>{rec.games_played}</strong>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
           )}
         </section>
 
@@ -458,28 +583,50 @@ export default function PlayerDashboardPage() {
           {recentRunes.length === 0 ? (
             <p className={styles.emptyState}>No rune data yet — run backfill/participant-perks.</p>
           ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Champion</th>
-                    <th>Keystone</th>
-                    <th>Primary Path</th>
-                    <th>Sub Path</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentRunes.map((entry) => (
-                    <tr key={entry.match_id}>
-                      <td>{entry.champion}</td>
-                      <td>{entry.keystone_name}</td>
-                      <td>{entry.primary_style_name}</td>
-                      <td>{entry.sub_style_name}</td>
+            <>
+              <div className={`${styles.tableWrap} ${styles.dashboardDesktopOnly}`}>
+                <table className={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Champion</th>
+                      <th>Keystone</th>
+                      <th>Primary Path</th>
+                      <th>Sub Path</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {recentRunes.map((entry) => (
+                      <tr key={entry.match_id}>
+                        <td>{entry.champion}</td>
+                        <td>{entry.keystone_name}</td>
+                        <td>{entry.primary_style_name}</td>
+                        <td>{entry.sub_style_name}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className={styles.dashboardMobileList}>
+                {recentRunes.map((entry) => (
+                  <article className={styles.dashboardMobileCard} key={entry.match_id}>
+                    <div className={styles.dashboardMobileHeader}>
+                      <strong>{entry.champion}</strong>
+                      <span className={styles.badge}>{entry.keystone_name}</span>
+                    </div>
+                    <div className={styles.dashboardMetricGrid}>
+                      <div>
+                        <span>Primary Path</span>
+                        <strong>{entry.primary_style_name}</strong>
+                      </div>
+                      <div>
+                        <span>Sub Path</span>
+                        <strong>{entry.sub_style_name}</strong>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </>
           )}
         </section>
 

@@ -602,7 +602,15 @@ async function resolvePlayer(puuid: string){
 const frontendMvpClient: FrontendMvpClient = {
   async listPlayers(minMatches = 10) {
     const url = `${_API}/players/?min_matches=${minMatches}`;
-    const res = await fetch(url);
+    let res: Response;
+    try {
+      res = await fetch(url);
+    } catch {
+      throw new MockApiError(
+        0,
+        "Could not reach the backend API. Make sure the backend server is running and NEXT_PUBLIC_API_URL is configured."
+      );
+    }
     if (!res.ok) {
       throw new Error("Failed to fetch player list from Riot API");
     }
@@ -611,17 +619,25 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async ingestPlayer(payload) {
-    const res = await fetch(`${_API}/ingest/player`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        gameName: payload.gameName,
-        tagLine: payload.tagLine,
-        platform: payload.platform,
-        count: payload.matchCount,
-        queue: payload.queue,
-      }),
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${_API}/ingest/player`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          gameName: payload.gameName,
+          tagLine: payload.tagLine,
+          platform: payload.platform,
+          count: payload.matchCount,
+          queue: payload.queue,
+        }),
+      });
+    } catch {
+      throw new MockApiError(
+        0,
+        "Could not reach the backend API. Make sure the backend server is running and NEXT_PUBLIC_API_URL is configured."
+      );
+    }
 
     if (!res.ok) {
       let detail = "";

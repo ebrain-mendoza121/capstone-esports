@@ -809,8 +809,8 @@ export default function ChampionsPage() {
         eyebrow="Champions"
         title="Champion Browser"
         description="Explore the champion roster with role affinities, class tags, live tracked performance data — and head-to-head matchup analysis."
-        backHref="/"
-        backLabel="Back to Home"
+        backHref="/tools"
+        backLabel="Back to Tools"
       />
 
       {/* ── Mode toggle card ── */}

@@ -1,15 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import styles from "@/styles/analytics-flow.module.css";
 
 const navItems = [
   { href: "/", label: "Home" },
-  { href: "/individual-stats", label: "Individual Stats" },
-  { href: "/team-insights", label: "Team Insights" },
-  { href: "/matchup-insights", label: "Matchup Insights" },
+  { href: "/tools", label: "Tools" },
   { href: "/champions", label: "Champions" },
 ];
 
@@ -18,10 +17,16 @@ function isActive(pathname: string, href: string): boolean {
     return pathname === "/";
   }
 
-  if (href === "/individual-stats") {
+  if (href === "/tools") {
     return (
       pathname === href ||
       pathname.startsWith(`${href}/`) ||
+      pathname === "/individual-stats" ||
+      pathname.startsWith("/individual-stats/") ||
+      pathname === "/team-insights" ||
+      pathname.startsWith("/team-insights/") ||
+      pathname === "/matchup-insights" ||
+      pathname.startsWith("/matchup-insights/") ||
       pathname.startsWith("/player/") ||
       pathname.startsWith("/match/")
     );
@@ -60,6 +65,15 @@ export default function AppNavbar() {
     <header className={styles.navbar}>
       <div className={styles.navInner}>
         <Link className={styles.brand} href="/" onClick={() => setMobileOpen(false)}>
+          <Image
+            className={styles.brandIcon}
+            src="/assets/iconNexus.png"
+            alt=""
+            width={64}
+            height={64}
+            aria-hidden="true"
+            priority
+          />
           NexusIQ Esports
         </Link>
 

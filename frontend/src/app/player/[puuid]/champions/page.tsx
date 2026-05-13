@@ -148,7 +148,7 @@ export default function ChampionStatsPage() {
               ))}
             </div>
 
-            <div className={styles.tableWrap}>
+            <div className={`${styles.tableWrap} ${styles.dashboardDesktopOnly}`}>
               <table className={styles.table}>
                 <thead>
                   <tr>
@@ -195,6 +195,67 @@ export default function ChampionStatsPage() {
                 </tbody>
               </table>
             </div>
+
+            {filtered.length === 0 ? (
+              <p className={`${styles.emptyState} ${styles.dashboardMobileList}`}>
+                {data.champions_found === 0
+                  ? "No ranked games found for this player."
+                  : "No champions match the selected role."}
+              </p>
+            ) : (
+              <div className={styles.dashboardMobileList}>
+                {filtered.map((champ) => (
+                  <article className={styles.dashboardMobileCard} key={champ.champion_id}>
+                    <div className={styles.dashboardMobileHeader}>
+                      <strong>{champ.champion_name}</strong>
+                      <span style={winRateCellStyle(champ.win_rate)}>
+                        {champ.win_rate !== null
+                          ? `${(champ.win_rate * 100).toFixed(1)}%`
+                          : "—"}
+                      </span>
+                    </div>
+
+                    <div className={styles.dashboardMetricGrid}>
+                      <div>
+                        <span>Games</span>
+                        <strong>{champ.games_played}</strong>
+                      </div>
+                      <div>
+                        <span>KDA</span>
+                        <strong>{fmt(champ.avg_kda, 2)}</strong>
+                      </div>
+                      <div>
+                        <span>CS / Min</span>
+                        <strong>{fmt(champ.avg_cs_per_min, 2)}</strong>
+                      </div>
+                      <div>
+                        <span>Gold / Min</span>
+                        <strong>{fmt(champ.avg_gold_per_min, 0)}</strong>
+                      </div>
+                      <div>
+                        <span>Kills</span>
+                        <strong>{fmt(champ.avg_kills, 1)}</strong>
+                      </div>
+                      <div>
+                        <span>Deaths</span>
+                        <strong>{fmt(champ.avg_deaths, 1)}</strong>
+                      </div>
+                      <div>
+                        <span>Assists</span>
+                        <strong>{fmt(champ.avg_assists, 1)}</strong>
+                      </div>
+                      <div>
+                        <span>K / D / A</span>
+                        <strong>
+                          {fmt(champ.avg_kills, 1)} / {fmt(champ.avg_deaths, 1)} /{" "}
+                          {fmt(champ.avg_assists, 1)}
+                        </strong>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
         )}
       </div>

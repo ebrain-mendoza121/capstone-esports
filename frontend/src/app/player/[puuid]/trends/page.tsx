@@ -14,7 +14,6 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
-  Legend,
 } from "recharts";
 import styles from "@/app/mvp.module.css";
 import {
@@ -77,7 +76,37 @@ function chartDate(ts: number) {
 
 // ── Custom tooltip ─────────────────────────────────────────────────────────
 
-function ChartTooltip({ active, payload, label, formatter }: any) {
+type ChartPayloadEntry = {
+  color?: string;
+  name?: string;
+  value?: number | null;
+};
+
+type ChartTooltipProps = {
+  active?: boolean;
+  payload?: ChartPayloadEntry[];
+  label?: string;
+  formatter?: (value: number) => string;
+};
+
+type DotRenderProps = {
+  cx?: number;
+  cy?: number;
+  payload?: {
+    win?: boolean;
+  };
+};
+
+type WinLossTooltipEntry = {
+  payload: {
+    win: boolean;
+    date: string;
+    champion: string | null;
+    kda: number | null;
+  };
+};
+
+function ChartTooltip({ active, payload, label, formatter }: ChartTooltipProps) {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
@@ -88,11 +117,20 @@ function ChartTooltip({ active, payload, label, formatter }: any) {
       fontSize: 12,
     }}>
       <p style={{ marginBottom: 4, opacity: 0.6, fontSize: 11 }}>{label}</p>
-      {payload.map((entry: any, i: number) => (
-        <p key={i} style={{ color: entry.color, margin: "2px 0" }}>
-          {entry.name}: <strong>{formatter ? formatter(entry.value) : entry.value?.toFixed(2)}</strong>
-        </p>
-      ))}
+      {payload.map((entry, i) => {
+        const value =
+          typeof entry.value === "number"
+            ? formatter
+              ? formatter(entry.value)
+              : entry.value.toFixed(2)
+            : "—";
+
+        return (
+          <p key={i} style={{ color: entry.color, margin: "2px 0" }}>
+            {entry.name}: <strong>{value}</strong>
+          </p>
+        );
+      })}
     </div>
   );
 }
@@ -147,13 +185,13 @@ function MetricChart({ data, color, label, formatter, referenceY, referenceLabel
             stroke={color}
             strokeWidth={2}
             fill={`url(#grad-${label.replace(/\s/g, "")})`}
-            dot={(props: any) => {
+            dot={(props: DotRenderProps) => {
               const { cx, cy, payload } = props;
               return (
                 <circle
                   key={`dot-${cx}-${cy}`}
                   cx={cx} cy={cy} r={3.5}
-                  fill={payload.win ? CHART_COLORS.win : CHART_COLORS.loss}
+                  fill={payload?.win ? CHART_COLORS.win : CHART_COLORS.loss}
                   stroke="#050b1d"
                   strokeWidth={1.5}
                 />
@@ -191,7 +229,7 @@ function WinLossChart({ series }: { series: TrendGamePoint[] }) {
           <XAxis dataKey="date" tick={CHART_STYLE} tickLine={false} axisLine={false} interval="preserveStartEnd" />
           <YAxis hide domain={[-1.5, 1.5]} />
           <Tooltip
-            content={({ active, payload }) => {
+            content={({ active, payload }: { active?: boolean; payload?: WinLossTooltipEntry[] }) => {
               if (!active || !payload?.length) return null;
               const d = payload[0].payload;
               return (
@@ -211,13 +249,13 @@ function WinLossChart({ series }: { series: TrendGamePoint[] }) {
             dataKey="result"
             name="Result"
             stroke="transparent"
-            dot={(props: any) => {
+            dot={(props: DotRenderProps) => {
               const { cx, cy, payload } = props;
               return (
                 <circle
                   key={`wl-${cx}-${cy}`}
                   cx={cx} cy={cy} r={5}
-                  fill={payload.win ? CHART_COLORS.win : CHART_COLORS.loss}
+                  fill={payload?.win ? CHART_COLORS.win : CHART_COLORS.loss}
                   stroke="#050b1d"
                   strokeWidth={1.5}
                 />
@@ -262,6 +300,51 @@ function GameRow({ g }: { g: TrendGamePoint }) {
       <td>{fmt(g.cs_per_min)}</td>
       <td>{pct(g.kill_participation)}</td>
     </tr>
+  );
+}
+
+function GameMobileCard({ g }: { g: TrendGamePoint }) {
+  const date = new Date(g.game_creation).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+
+  return (
+    <article className={styles.dashboardMobileCard}>
+      <div className={styles.dashboardMobileHeader}>
+        <strong>{g.champion ?? "Unknown champion"}</strong>
+        <span className={g.win ? styles.badgeWin : styles.badgeLoss}>
+          {g.win ? "Win" : "Loss"}
+        </span>
+      </div>
+
+      <div className={styles.dashboardMetricGrid}>
+        <div>
+          <span>Date</span>
+          <strong>{date}</strong>
+        </div>
+        <div>
+          <span>Role</span>
+          <strong>{g.role ?? "—"}</strong>
+        </div>
+        <div>
+          <span>K/D/A</span>
+          <strong>{g.kills ?? "—"}/{g.deaths ?? "—"}/{g.assists ?? "—"}</strong>
+        </div>
+        <div>
+          <span>KDA</span>
+          <strong>{fmt(g.kda)}</strong>
+        </div>
+        <div>
+          <span>CS/Min</span>
+          <strong>{fmt(g.cs_per_min)}</strong>
+        </div>
+        <div>
+          <span>Kill Part.</span>
+          <strong>{pct(g.kill_participation)}</strong>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -444,7 +527,7 @@ export default function TrendsPage() {
                 <p className={styles.sectionCopy}>Last {series.length} ranked solo/duo games.</p>
               </div>
             </div>
-            <div className={styles.tableWrap}>
+            <div className={`${styles.tableWrap} ${styles.dashboardDesktopOnly}`}>
               <table className={styles.table}>
                 <thead>
                   <tr>
@@ -462,6 +545,12 @@ export default function TrendsPage() {
                   {series.map((g, i) => <GameRow key={i} g={g} />)}
                 </tbody>
               </table>
+            </div>
+
+            <div className={styles.dashboardMobileList}>
+              {series.map((g, i) => (
+                <GameMobileCard key={i} g={g} />
+              ))}
             </div>
           </section>
         )}

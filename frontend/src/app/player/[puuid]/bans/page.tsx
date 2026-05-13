@@ -178,7 +178,7 @@ export default function BanAnalyticsPage() {
                 </div>
               </div>
 
-              <div className={styles.tableWrap}>
+              <div className={`${styles.tableWrap} ${styles.dashboardDesktopOnly}`}>
                 <table className={styles.table}>
                   <thead>
                     <tr>
@@ -201,6 +201,31 @@ export default function BanAnalyticsPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+
+              <div className={styles.dashboardMobileList}>
+                {globalBans.map((entry) => (
+                  <article className={styles.dashboardMobileCard} key={entry.champion_name}>
+                    <div className={styles.dashboardMobileHeader}>
+                      <strong>{entry.champion_name}</strong>
+                      <span className={styles.badgeNeutral}>Global</span>
+                    </div>
+                    <div className={styles.dashboardMetricGrid}>
+                      <div>
+                        <span>Ban Count</span>
+                        <strong>{entry.ban_count}</strong>
+                      </div>
+                      <div>
+                        <span>Ban Rate</span>
+                        <strong>
+                          {globalBanRates[entry.champion_name] !== undefined
+                            ? `${globalBanRates[entry.champion_name]}%`
+                            : "..."}
+                        </strong>
+                      </div>
+                    </div>
+                  </article>
+                ))}
               </div>
             </section>
           </>

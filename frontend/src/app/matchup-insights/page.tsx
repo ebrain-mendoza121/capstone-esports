@@ -372,8 +372,8 @@ export default function MatchupInsightsPage() {
         eyebrow="Flow 3"
         title="Matchup Insights"
         description="Compare two 5-player teams head-to-head. Get win probability, per-role edges, composition archetypes, and threat scores."
-        backHref="/"
-        backLabel="Back to Home"
+        backHref="/tools"
+        backLabel="Back to Tools"
       />
 
       <form onSubmit={handleSubmit}>

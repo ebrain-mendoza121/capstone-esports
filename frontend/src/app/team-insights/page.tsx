@@ -219,8 +219,8 @@ export default function TeamInsightsPage() {
         eyebrow="Flow 2"
         title="Team Insights"
         description="Enter 5 players with role to analyze team composition, stats, strengths, and AI-driven threat scores."
-        backHref="/"
-        backLabel="Back to Home"
+        backHref="/tools"
+        backLabel="Back to Tools"
       />
 
       <form onSubmit={handleSubmit} className={styles.formStack}>

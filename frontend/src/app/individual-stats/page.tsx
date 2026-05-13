@@ -41,9 +41,13 @@ export default function IndividualStatsPage() {
         if (mounted) {
           setPlayers(response);
         }
-      } catch {
+      } catch (error) {
         if (mounted) {
-          setErrorMessage("Could not load existing player profiles. Please refresh.");
+          setErrorMessage(
+            error instanceof MockApiError
+              ? error.message
+              : "Could not load existing player profiles. Please refresh."
+          );
         }
       } finally {
         if (mounted) {
@@ -84,8 +88,8 @@ export default function IndividualStatsPage() {
         eyebrow="Flow 1"
         title="See Your Individual Stats"
         description="Analyze one player profile by Riot ID and move directly into dashboard-level stats. This route keeps the original ingest flow and remains ready for player endpoint integration."
-        backHref="/"
-        backLabel="Back to Home"
+        backHref="/tools"
+        backLabel="Back to Tools"
       />
 
       <section className={styles.sectionCard}>

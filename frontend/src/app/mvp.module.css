@@ -79,6 +79,13 @@
   flex-shrink: 0;
 }
 
+.dashboardActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .section {
   border: 1px solid rgba(116, 199, 255, 0.16);
   border-radius: 18px;
@@ -172,6 +179,7 @@
   border: 1px solid rgba(116, 199, 255, 0.3);
   color: #f4f6ff;
   background: rgba(32, 40, 50, 0.74);
+  cursor: pointer;
 }
 
 .buttonPrimary:hover,
@@ -226,6 +234,83 @@
   overflow: auto;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 12px;
+}
+
+.dashboardMobileList {
+  display: none;
+}
+
+.dashboardMobileCard {
+  border: 1px solid rgba(116, 199, 255, 0.17);
+  border-radius: 14px;
+  background: rgba(9, 15, 36, 0.74);
+  padding: 12px;
+}
+
+.dashboardMobileHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.dashboardMobileHeader strong {
+  min-width: 0;
+  color: #ffffff;
+  font-size: 0.98rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.dashboardMetricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.dashboardMetricGrid div {
+  min-width: 0;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 8px;
+}
+
+.dashboardMetricGrid span {
+  display: block;
+  color: rgba(243, 244, 239, 0.62);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.dashboardMetricGrid strong {
+  display: block;
+  margin-top: 4px;
+  color: #f8fbff;
+  font-size: 0.92rem;
+  overflow-wrap: anywhere;
+}
+
+.dashboardMobileAction {
+  display: flex;
+  justify-content: center;
+  margin-top: 10px;
+  width: 100%;
+}
+
+.dashboardMobileItems {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 8px;
+}
+
+.dashboardMobileItems > span {
+  color: rgba(243, 244, 239, 0.62);
+  font-size: 0.68rem;
+  text-transform: uppercase;
 }
 
 .table {
@@ -410,6 +495,13 @@
 @media (max-width: 760px) {
   .container {
     width: min(1280px, 100% - 18px);
+    padding-top: 18px;
+  }
+
+  .hero,
+  .section {
+    border-radius: 14px;
+    padding: 14px;
   }
 
   .heroTitleRow {
@@ -417,21 +509,52 @@
     align-items: flex-start;
   }
 
+  .dashboardActions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardActions > *,
   .heroAction {
     width: 100%;
+  }
+
+  .sectionHeader {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .twoCol,
   .threeCol,
   .cardGrid,
   .placeholderGrid,
-  .formGrid,
-  .kpiGrid {
+  .formGrid {
     grid-template-columns: 1fr;
+  }
+
+  .kpiGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboardDesktopOnly {
+    display: none;
+  }
+
+  .dashboardMobileList {
+    display: grid;
+    gap: 10px;
   }
 
   .barRow {
     grid-template-columns: 1fr;
     gap: 5px;
+  }
+}
+
+@media (max-width: 420px) {
+  .kpiGrid,
+  .dashboardMetricGrid {
+    grid-template-columns: 1fr;
   }
 }

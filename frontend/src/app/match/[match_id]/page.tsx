@@ -85,6 +85,79 @@ function ItemStrip({ items, version, itemNames }: { items: number[]; version: st
     </div>
   );
 }
+
+function ParticipantMobileCard({
+  entry,
+  ddVersion,
+  itemNames,
+  runeMap,
+  onPlayerClick,
+}: {
+  entry: MatchDetail["participants"][number];
+  ddVersion: string;
+  itemNames: Record<number, string>;
+  runeMap: Record<string, string>;
+  onPlayerClick: (puuid: string, riotId: string, tagLine: string) => void;
+}) {
+  return (
+    <article className={styles.dashboardMobileCard}>
+      <div className={styles.dashboardMobileHeader}>
+        <strong>{entry.riot_id}</strong>
+        <span className={entry.win ? styles.badgeWin : styles.badgeLoss}>
+          {entry.win ? "Win" : "Loss"}
+        </span>
+      </div>
+
+      <div className={styles.dashboardMetricGrid}>
+        <div>
+          <span>Champion</span>
+          <strong>{entry.champion}</strong>
+        </div>
+        <div>
+          <span>Role</span>
+          <strong>{entry.role}</strong>
+        </div>
+        <div>
+          <span>K/D/A</span>
+          <strong>{entry.kills}/{entry.deaths}/{entry.assists}</strong>
+        </div>
+        <div>
+          <span>CS</span>
+          <strong>{entry.cs}</strong>
+        </div>
+        <div>
+          <span>Gold</span>
+          <strong>{entry.gold_earned.toLocaleString()}</strong>
+        </div>
+        <div>
+          <span>Damage</span>
+          <strong>{entry.total_damage.toLocaleString()}</strong>
+        </div>
+        <div>
+          <span>Vision</span>
+          <strong>{entry.vision_score}</strong>
+        </div>
+        <div>
+          <span>Keystone</span>
+          <strong>{runeMap[entry.perks.keystone] ?? entry.perks.keystone}</strong>
+        </div>
+      </div>
+
+      <div className={styles.dashboardMobileItems}>
+        <span>Items</span>
+        <ItemStrip items={entry.items} version={ddVersion} itemNames={itemNames} />
+      </div>
+
+      <button
+        className={`${styles.buttonGhost} ${styles.dashboardMobileAction}`}
+        type="button"
+        onClick={() => onPlayerClick(entry.puuid, entry.riot_id, entry.tag_line)}
+      >
+        View Player
+      </button>
+    </article>
+  );
+}
 // ── Champion chip row (draft section) ───────────────────────────────────────
 
 function ChampionChipRow({
@@ -563,7 +636,7 @@ export default function MatchDetailPage() {
               <p className={styles.sectionCopy}>All five participants with item strip and keystone</p>
             </div>
           </div>
-          <div className={styles.tableWrap}>
+          <div className={`${styles.tableWrap} ${styles.dashboardDesktopOnly}`}>
             <table className={styles.table}>
               <thead>
                 <tr>
@@ -614,6 +687,19 @@ export default function MatchDetailPage() {
               </tbody>
             </table>
           </div>
+
+          <div className={styles.dashboardMobileList}>
+            {blueTeam.map((entry) => (
+              <ParticipantMobileCard
+                key={entry.puuid}
+                entry={entry}
+                ddVersion={ddVersion}
+                itemNames={itemNames}
+                runeMap={runeMap}
+                onPlayerClick={handlePlayerClick}
+              />
+            ))}
+          </div>
         </section>
 
         <section className={styles.section}>
@@ -622,7 +708,7 @@ export default function MatchDetailPage() {
               <h2 className={styles.sectionTitle}>Scoreboard — Red Team</h2>
             </div>
           </div>
-          <div className={styles.tableWrap}>
+          <div className={`${styles.tableWrap} ${styles.dashboardDesktopOnly}`}>
             <table className={styles.table}>
               <thead>
                 <tr>
@@ -672,6 +758,19 @@ export default function MatchDetailPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          <div className={styles.dashboardMobileList}>
+            {redTeam.map((entry) => (
+              <ParticipantMobileCard
+                key={entry.puuid}
+                entry={entry}
+                ddVersion={ddVersion}
+                itemNames={itemNames}
+                runeMap={runeMap}
+                onPlayerClick={handlePlayerClick}
+              />
+            ))}
           </div>
         </section>
 
