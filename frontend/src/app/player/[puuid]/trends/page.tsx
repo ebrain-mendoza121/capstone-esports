@@ -229,7 +229,7 @@ function WinLossChart({ series }: { series: TrendGamePoint[] }) {
           <XAxis dataKey="date" tick={CHART_STYLE} tickLine={false} axisLine={false} interval="preserveStartEnd" />
           <YAxis hide domain={[-1.5, 1.5]} />
           <Tooltip
-            content={({ active, payload }: { active?: boolean; payload?: WinLossTooltipEntry[] }) => {
+            content={({ active, payload }: { active?: boolean; payload?: readonly WinLossTooltipEntry[] }) => {
               if (!active || !payload?.length) return null;
               const d = payload[0].payload;
               return (
