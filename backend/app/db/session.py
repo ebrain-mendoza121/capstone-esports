@@ -36,7 +36,7 @@ _pool_kwargs = (
                              # This keeps the Uvicorn thread pool healthy — threads fail quickly and free
                              # up so DB-free endpoints (/ and /health) aren't starved by stalled waiters.
         pool_recycle=1800,   # recycle every 30 min to avoid server-side idle timeouts
-        connect_args={"prepare_threshold": 0},  # disable prepared statements for PgBouncer Transaction Mode
+        connect_args={"prepare_threshold": None},  # disable prepared statements for PgBouncer Transaction Mode
     )
 )
 
