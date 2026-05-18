@@ -48,7 +48,7 @@ class IngestPlayerRequest(BaseModel):
     platform: str = Field(..., description="Platform region (NA, EUW, KR, etc.)")
     count: int = Field(default=20, ge=1, le=100, description="Number of matches to fetch (max 100)")
     queue: int = Field(default=420, description="Queue ID filter (420=Ranked Solo, 440=Ranked Flex)")
-    fetch_timeline: bool = Field(default=False, description="Also fetch & store match timeline data (slower, uses extra API quota)")  # noqa: E501
+    fetch_timeline: bool = Field(default=True, description="Also fetch & store match timeline data (slower, uses extra API quota)")  # noqa: E501
 
     @field_validator("platform", mode="before")
     @classmethod

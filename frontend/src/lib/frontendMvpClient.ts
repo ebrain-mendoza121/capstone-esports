@@ -630,6 +630,7 @@ const frontendMvpClient: FrontendMvpClient = {
           platform: payload.platform,
           count: payload.matchCount,
           queue: payload.queue,
+          fetch_timeline: true,
         }),
       });
     } catch {
