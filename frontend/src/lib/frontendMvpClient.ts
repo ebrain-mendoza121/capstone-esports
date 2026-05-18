@@ -384,6 +384,11 @@ export interface TimelineFrameRaw {
   total_gold: number;
 }
 
+export interface GoldDiffPoint {
+  minute: number;
+  diff: number;
+}
+
 export type TimelineEventType =
   | "CHAMPION_KILL"
   | "BUILDING_KILL"
@@ -457,6 +462,7 @@ export interface FrontendMvpClient {
   getTimelineAvailability(matchId: string): Promise<TimelineAvailability>;//TODO
   getTimelineFramesByPuuid(matchId: string, puuid: string): Promise<TimelineFrame[]>;//TODO
   getTimelineFramesAll(matchId: string, limit?: number): Promise<TimelineFrameRaw[]>;
+  getGoldDiff(matchId: string): Promise<GoldDiffPoint[]>;
   getTimelineEvents(matchId: string, limit: number, cursor?: string): Promise<TimelineEventsResponse>;//TODO
 }
 
@@ -961,6 +967,12 @@ async getPlayerTrends(puuid, window = 20) {
     );
     if (!res.ok) throw new Error(`Failed to fetch timeline frames (${res.status})`);
     return res.json() as Promise<TimelineFrameRaw[]>;
+  },
+
+  async getGoldDiff(matchId) {
+    const res = await fetch(`${_API}/timeline/${matchId}/gold-diff`);
+    if (!res.ok) throw new Error(`Failed to fetch gold diff (${res.status})`);
+    return res.json() as Promise<GoldDiffPoint[]>;
   },
 
   async getTimelineEvents(matchId, limit, cursor) {

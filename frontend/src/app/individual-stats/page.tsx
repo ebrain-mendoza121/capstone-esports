@@ -23,6 +23,8 @@ const defaultForm: IngestPlayerInput = {
   queue: 420,
 };
 
+const PAGE_SIZE = 10;
+
 export default function IndividualStatsPage() {
   const router = useRouter();
 
@@ -31,6 +33,24 @@ export default function IndividualStatsPage() {
   const [loadingPlayers, setLoadingPlayers] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const filteredPlayers = players.filter((p) => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      p.riot_id.toLowerCase().includes(q) ||
+      p.tag_line.toLowerCase().includes(q) ||
+      p.region.toLowerCase().includes(q)
+    );
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredPlayers.length / PAGE_SIZE));
+  const pagedPlayers = filteredPlayers.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -185,7 +205,7 @@ export default function IndividualStatsPage() {
       <section className={styles.sectionCard}>
         <h2 className={styles.sectionTitle}>Results</h2>
         <p className={styles.sectionText}>
-          Showing players with 10+ matches — sorted by most matches. Ghost participants (opponents from ingested matches with fewer than 10 games) are hidden.
+          Showing players with 10+ matches — sorted by most matches. Ghost participants are hidden.
         </p>
 
         <hr className={styles.divider} />
@@ -197,67 +217,113 @@ export default function IndividualStatsPage() {
         ) : null}
 
         {!loadingPlayers && players.length > 0 ? (
-          <div className={styles.playerResults}>
-            <div className={`${styles.tableWrap} ${styles.playerTableDesktop}`}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>Riot ID</th>
-                    <th>Tag</th>
-                    <th>Region</th>
-                    <th>Matches</th>
-                    <th>Open</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {players.map((player) => (
-                    <tr key={player.puuid}>
-                      <td>{player.riot_id}</td>
-                      <td>#{player.tag_line}</td>
-                      <td>{player.region}</td>
-                      <td>{player.match_count}</td>
-                      <td>
-                        <button
-                          className={styles.buttonSecondary}
-                          type="button"
-                          onClick={() => router.push(`/player/${player.puuid}`)}
-                        >
-                          Go to Dashboard
-                        </button>
-                      </td>
-                    </tr>
+          <>
+            <div className={styles.searchRow}>
+              <input
+                className={styles.searchInput}
+                type="search"
+                placeholder="Search by Riot ID, tag, or region…"
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+              />
+              <span className={styles.searchCount}>
+                {filteredPlayers.length} / {players.length} player{players.length !== 1 ? "s" : ""}
+              </span>
+            </div>
+
+            {filteredPlayers.length === 0 ? (
+              <p className={styles.emptyState}>No players match &ldquo;{searchQuery}&rdquo;.</p>
+            ) : (
+              <div className={styles.playerResults}>
+                <div className={`${styles.tableWrap} ${styles.playerTableDesktop}`}>
+                  <table className={styles.table}>
+                    <thead>
+                      <tr>
+                        <th>Riot ID</th>
+                        <th>Tag</th>
+                        <th>Region</th>
+                        <th>Matches</th>
+                        <th>Open</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedPlayers.map((player) => (
+                        <tr key={player.puuid}>
+                          <td>{player.riot_id}</td>
+                          <td>#{player.tag_line}</td>
+                          <td>{player.region}</td>
+                          <td>{player.match_count}</td>
+                          <td>
+                            <button
+                              className={styles.buttonSecondary}
+                              type="button"
+                              onClick={() => router.push(`/player/${player.puuid}`)}
+                            >
+                              Go to Dashboard
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className={styles.playerCardsMobile}>
+                  {pagedPlayers.map((player) => (
+                    <article key={player.puuid} className={styles.playerCardMobile}>
+                      <div className={styles.playerCardMobileHeader}>
+                        <h3 className={styles.playerCardMobileTitle}>
+                          {player.riot_id}
+                          <span className={styles.playerCardMobileTag}>#{player.tag_line}</span>
+                        </h3>
+                        <span className={styles.playerCardMobileRegion}>{player.region}</span>
+                      </div>
+
+                      <p className={styles.playerCardMobileStats}>
+                        <span>Tracked Matches</span>
+                        <strong>{player.match_count}</strong>
+                      </p>
+
+                      <button
+                        className={`${styles.buttonSecondary} ${styles.playerCardMobileButton}`}
+                        type="button"
+                        onClick={() => router.push(`/player/${player.puuid}`)}
+                      >
+                        Go to Dashboard
+                      </button>
+                    </article>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </div>
 
-            <div className={styles.playerCardsMobile}>
-              {players.map((player) => (
-                <article key={player.puuid} className={styles.playerCardMobile}>
-                  <div className={styles.playerCardMobileHeader}>
-                    <h3 className={styles.playerCardMobileTitle}>
-                      {player.riot_id}
-                      <span className={styles.playerCardMobileTag}>#{player.tag_line}</span>
-                    </h3>
-                    <span className={styles.playerCardMobileRegion}>{player.region}</span>
+                {totalPages > 1 ? (
+                  <div className={styles.pagination}>
+                    <button
+                      className={styles.pageBtn}
+                      type="button"
+                      disabled={currentPage === 1}
+                      onClick={() => setCurrentPage((p) => p - 1)}
+                    >
+                      ← Prev
+                    </button>
+                    <span className={styles.pageInfo}>
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                      className={styles.pageBtn}
+                      type="button"
+                      disabled={currentPage === totalPages}
+                      onClick={() => setCurrentPage((p) => p + 1)}
+                    >
+                      Next →
+                    </button>
                   </div>
-
-                  <p className={styles.playerCardMobileStats}>
-                    <span>Tracked Matches</span>
-                    <strong>{player.match_count}</strong>
-                  </p>
-
-                  <button
-                    className={`${styles.buttonSecondary} ${styles.playerCardMobileButton}`}
-                    type="button"
-                    onClick={() => router.push(`/player/${player.puuid}`)}
-                  >
-                    Go to Dashboard
-                  </button>
-                </article>
-              ))}
-            </div>
-          </div>
+                ) : null}
+              </div>
+            )}
+          </>
         ) : null}
       </section>
     </AppFrame>

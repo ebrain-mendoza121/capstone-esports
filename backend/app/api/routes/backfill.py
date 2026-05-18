@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy import text
+from sqlalchemy import func, text
 from typing import Optional
 
 from app.db.session import get_db
@@ -418,14 +418,22 @@ async def backfill_timeline(
     # Sub-query: match_ids that already have timeline data
     has_timeline_subq = db.query(MatchTimeline.match_id).subquery()
 
-    # Find matches without timeline, with one routing region to re-fetch
+    # Find matches without timeline, with one routing region to re-fetch.
+    #
+    # GROUP BY instead of DISTINCT ON: PostgreSQL requires DISTINCT ON (x) to
+    # have ORDER BY starting with x, which conflicts with ordering by
+    # game_creation.  GROUP BY avoids that constraint entirely and still
+    # produces exactly one row per match_id, ordered most-recent-first.
     missing_q = (
-        db.query(Match.match_id, Player.region)
+        db.query(
+            Match.match_id,
+            func.max(Player.region).label("region"),
+        )
         .join(ParticipantStats, ParticipantStats.match_id == Match.match_id)
         .join(Player, Player.id == ParticipantStats.player_id)
         .filter(Match.match_id.notin_(db.query(has_timeline_subq.c.match_id)))
+        .group_by(Match.match_id, Match.game_creation)
         .order_by(Match.game_creation.desc())
-        .distinct(Match.match_id)
     )
 
     if puuid:
