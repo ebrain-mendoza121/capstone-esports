@@ -2,6 +2,50 @@ import { getApiBaseUrl } from "@/lib/apiBaseUrl";
 
 const _API = getApiBaseUrl();
 
+const CLIENT_CACHE_TTL_MS = 45_000;
+
+type CacheEntry = {
+  expiresAt: number;
+  value: unknown;
+};
+
+const clientCache = new Map<string, CacheEntry>();
+const inflightRequests = new Map<string, Promise<unknown>>();
+
+function getCached<T>(key: string): T | null {
+  const entry = clientCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    clientCache.delete(key);
+    return null;
+  }
+  return entry.value as T;
+}
+
+async function withClientCache<T>(
+  key: string,
+  loader: () => Promise<T>,
+  ttlMs = CLIENT_CACHE_TTL_MS,
+): Promise<T> {
+  const cached = getCached<T>(key);
+  if (cached !== null) return cached;
+
+  const inflight = inflightRequests.get(key);
+  if (inflight) return inflight as Promise<T>;
+
+  const request = loader()
+    .then((value) => {
+      clientCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+      return value;
+    })
+    .finally(() => {
+      inflightRequests.delete(key);
+    });
+
+  inflightRequests.set(key, request as Promise<unknown>);
+  return request;
+}
+
 export type QueueCode = 420 | 440;
 export type RoleCode = "TOP" | "JUNGLE" | "MID" | "BOT" | "SUPPORT";
 
@@ -674,58 +718,70 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getPlayer(puuid) {
-    const player = await resolvePlayer(puuid);
-    return {
-      ...player
-    };
+    return withClientCache(`player:${puuid}`, async () => {
+      const player = await resolvePlayer(puuid);
+      return {
+        ...player,
+      };
+    });
   },
 
   async getPlayerMetrics(puuid) {
-    const res = await fetch(`${_API}/metrics/player/${puuid}`);
-    if (!res.ok) {
-      throw new Error("Failed to fetch player metrics from Riot API");
-    }
-    const metrics = await res.json();
+    return withClientCache(`player-metrics:${puuid}`, async () => {
+      const res = await fetch(`${_API}/metrics/player/${puuid}`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch player metrics from Riot API");
+      }
+      const metrics = await res.json();
 
-    return {
-      matches_played: metrics.matches,
-      win_rate: metrics.win_rate,
-      avg_kda: metrics.kda,
-      avg_cs_per_min: metrics.cs_per_min,
-      avg_gold_per_min: metrics.gold_per_min,
-      avg_vision_per_min: metrics.vision_per_min,
-      kill_participation: metrics.kill_participation ?? 0,
-      damage_share: metrics.damage_share ?? 0,
-    };
+      return {
+        matches_played: metrics.matches,
+        win_rate: metrics.win_rate,
+        avg_kda: metrics.kda,
+        avg_cs_per_min: metrics.cs_per_min,
+        avg_gold_per_min: metrics.gold_per_min,
+        avg_vision_per_min: metrics.vision_per_min,
+        kill_participation: metrics.kill_participation ?? 0,
+        damage_share: metrics.damage_share ?? 0,
+      };
+    });
   },
 
   async getPlayerRunes(puuid, limit) {
-    const res = await fetch(`${_API}/analytics/player/${puuid}/runes?limit=${limit}`);
-    if (!res.ok) {      throw new Error("Failed to fetch player rune history from Riot API");
-    }
-    const runes = await res.json();
-
-    return [...runes.runes];
+    return withClientCache(`player-runes:${puuid}:${limit}`, async () => {
+      const res = await fetch(`${_API}/analytics/player/${puuid}/runes?limit=${limit}`);
+      if (!res.ok) {
+        throw new Error("Failed to fetch player rune history from Riot API");
+      }
+      const runes = await res.json();
+      return [...runes.runes];
+    });
   },
 
   async getPlayerRolePerformance(puuid) {
-    const res = await fetch(`${_API}/analytics/player/${puuid}/role-performance`);
-    if (!res.ok) throw new Error("Failed to fetch role performance");
-    return res.json() as Promise<PlayerRolePerformance>;
+    return withClientCache(`player-role-perf:${puuid}`, async () => {
+      const res = await fetch(`${_API}/analytics/player/${puuid}/role-performance`);
+      if (!res.ok) throw new Error("Failed to fetch role performance");
+      return res.json() as Promise<PlayerRolePerformance>;
+    });
   },
 
   async getPlayerPlaystyle(puuid) {
-    const res = await fetch(`${_API}/ai/playstyle/${puuid}`);
-    // 503 = model not trained yet — return null instead of throwing
-    if (res.status === 503) return null;
-    if (!res.ok) throw new Error("Failed to fetch playstyle");
-    return res.json() as Promise<PlaystyleResult>;
+    return withClientCache(`player-playstyle:${puuid}`, async () => {
+      const res = await fetch(`${_API}/ai/playstyle/${puuid}`);
+      // 503 = model not trained yet — return null instead of throwing
+      if (res.status === 503) return null;
+      if (!res.ok) throw new Error("Failed to fetch playstyle");
+      return res.json() as Promise<PlaystyleResult>;
+    });
   },
 
   async getChampionRecommendations(puuid, topN = 10) {
-    const res = await fetch(`${_API}/ai/champions/${puuid}?top_n=${topN}`);
-    if (!res.ok) throw new Error("Failed to fetch champion recommendations");
-    return res.json() as Promise<ChampionRecommendation[]>;
+    return withClientCache(`player-champ-recs:${puuid}:${topN}`, async () => {
+      const res = await fetch(`${_API}/ai/champions/${puuid}?top_n=${topN}`);
+      if (!res.ok) throw new Error("Failed to fetch champion recommendations");
+      return res.json() as Promise<ChampionRecommendation[]>;
+    });
   },
 
   async getMatchesByPlayer(puuid, limit) {
@@ -794,9 +850,11 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
   async getModelsStatus() {
-    const res = await fetch(`${_API}/ai/models/status`);
-    if (!res.ok) throw new Error("Failed to fetch models status");
-    return res.json() as Promise<ModelsStatus>;
+    return withClientCache("models-status", async () => {
+      const res = await fetch(`${_API}/ai/models/status`);
+      if (!res.ok) throw new Error("Failed to fetch models status");
+      return res.json() as Promise<ModelsStatus>;
+    });
   },
 
   async getThreatWeights() {
@@ -936,29 +994,35 @@ const frontendMvpClient: FrontendMvpClient = {
   },
 
 async getPlayerTrends(puuid, window = 20) {
-    const res = await fetch(
-      `${_API}/analytics/player/${puuid}/trends?window=${window}`
-    );
-    if (!res.ok) {
-      throw new Error(`Failed to fetch trends (${res.status})`);
-    }
-    return (await res.json()) as PlayerTrends;
+    return withClientCache(`player-trends:${puuid}:${window}`, async () => {
+      const res = await fetch(
+        `${_API}/analytics/player/${puuid}/trends?window=${window}`
+      );
+      if (!res.ok) {
+        throw new Error(`Failed to fetch trends (${res.status})`);
+      }
+      return (await res.json()) as PlayerTrends;
+    });
   },
 
   async getPlayerChampionStats(puuid, minGames = 1) {
-    const res = await fetch(
-      `${_API}/analytics/player/${puuid}/champion-stats?min_games=${minGames}`
-    );
-    if (!res.ok) throw new Error(`Failed to fetch champion stats (${res.status})`);
-    return res.json() as Promise<PlayerChampionStats>;
+    return withClientCache(`player-champion-stats:${puuid}:${minGames}`, async () => {
+      const res = await fetch(
+        `${_API}/analytics/player/${puuid}/champion-stats?min_games=${minGames}`
+      );
+      if (!res.ok) throw new Error(`Failed to fetch champion stats (${res.status})`);
+      return res.json() as Promise<PlayerChampionStats>;
+    });
   },
 
   async getObjectiveControl(puuid) {
-    const res = await fetch(
-      `${_API}/analytics/player/${puuid}/objective-control`
-    );
-    if (!res.ok) throw new Error(`Failed to fetch objective control (${res.status})`);
-    return res.json() as Promise<ObjectiveControl>;
+    return withClientCache(`player-objective-control:${puuid}`, async () => {
+      const res = await fetch(
+        `${_API}/analytics/player/${puuid}/objective-control`
+      );
+      if (!res.ok) throw new Error(`Failed to fetch objective control (${res.status})`);
+      return res.json() as Promise<ObjectiveControl>;
+    });
   },
 
   async getTimelineFramesAll(matchId, limit = 1000) {
