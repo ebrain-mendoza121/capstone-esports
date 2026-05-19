@@ -11,6 +11,10 @@ from app.schemas.ingest import (
     BatchIngestResponse,
 )
 from app.services.ingestion_service import ingest_player
+from app.services.opponent_backfill import (
+    enqueue_opponents_for_puuid,
+    get_status as get_backfill_status,
+)
 from app.services.riot_client import RiotApiError
 
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
@@ -53,6 +57,16 @@ async def ingest_player_route(request: Request, payload: IngestPlayerRequest, db
             queue=payload.queue,
             fetch_timeline=payload.fetch_timeline,
         )
+        # Fire-and-forget: queue every stub opponent for background ingest.
+        # Pure DB read; never blocks the response.
+        try:
+            enqueue_opponents_for_puuid(db, puuid, platform)
+        except Exception as exc:
+            # Background plumbing must never fail the foreground request.
+            import logging as _logging
+            _logging.getLogger(__name__).warning(
+                "Opponent backfill enqueue failed for %s: %s", puuid[:8], exc,
+            )
         return IngestPlayerResponse(
             puuid=puuid,
             platform=platform,
@@ -131,6 +145,14 @@ async def ingest_players_batch(
                 failed=failed,
             ))
             succeeded += 1
+            # Queue stub opponents for background ingest.
+            try:
+                enqueue_opponents_for_puuid(db, puuid, platform)
+            except Exception as exc:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "Opponent backfill enqueue failed for %s: %s", puuid[:8], exc,
+                )
         except Exception as exc:
             db.rollback()
             results.append(BatchIngestPlayerResult(
@@ -150,3 +172,9 @@ async def ingest_players_batch(
         errored=errored,
         results=results,
     )
+
+
+@router.get("/jobs/opponents", summary="Background opponent-backfill queue status")
+async def opponent_backfill_status() -> dict:
+    """Snapshot of the in-process opponent backfill worker."""
+    return get_backfill_status()

@@ -596,6 +596,15 @@ async def build_team(
             "recommended_champions":       player_champ_recs[i],
         })
 
+    # Fire-and-forget: queue any matchup/build participants that aren't fully
+    # ingested yet so future calls hit the DB fast-path.
+    try:
+        from app.services.opponent_backfill import enqueue_puuids
+        build_puuids = [s.get("puuid") for s in player_stats if s.get("puuid")]
+        enqueue_puuids(db, build_puuids, body.platform)
+    except Exception as _e:
+        logger.warning("Team-build opponent backfill enqueue failed: %s", _e)
+
     return {
         "platform":             body.platform,
         "composition_focus":    body.composition_focus,
@@ -886,6 +895,19 @@ async def predict_matchup(
             })
     except Exception as _e:
         logger.warning("Champion matchup flag lookup failed: %s", _e)
+
+    # Fire-and-forget: queue every matchup participant for background ingest
+    # so future matchups hit the DB fast-path and the win-predictor sees
+    # this data on the next retrain. enqueue_puuids filters out players that
+    # are already fully ingested.
+    try:
+        from app.services.opponent_backfill import enqueue_puuids
+        matchup_puuids = [
+            s.get("puuid") for s in (blue_stats + red_stats) if s.get("puuid")
+        ]
+        enqueue_puuids(db, matchup_puuids, body.platform)
+    except Exception as _e:
+        logger.warning("Matchup opponent backfill enqueue failed: %s", _e)
 
     return {
         "platform":               body.platform,

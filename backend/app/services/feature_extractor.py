@@ -1265,6 +1265,11 @@ def get_all_rolling_features_bulk(db: Session) -> pd.DataFrame:
             on="match_id",
             how="left",
         )
+        # Flip sign for team-200 rows so the feature is "my team − enemy team"
+        # rather than always "team100 − team200" (which inverts the label half the time).
+        df["team_gold_diff_prior"] = df["team_gold_diff_prior"] * np.where(
+            df["team_id"] == 200, -1, 1
+        )
         # Drop internal helper column
         df = df.drop(columns=["_team_avg_gold"], errors="ignore")
 
@@ -1291,6 +1296,17 @@ def get_all_rolling_features_bulk(db: Session) -> pd.DataFrame:
         })
 
         df = df.merge(opp_aggs, on=["match_id", "team_id"], how="left")
+
+        # Count of tracked opponents per (match_id, team_id) — lets the trainer
+        # filter out rows where opponent stats are mostly NaN/imputed, and lets
+        # the model down-weight low-context rows at inference time.
+        opp_counts = (
+            df.groupby(["match_id", "team_id"]).size().reset_index(name="_self_count")
+        )
+        opp_counts["team_id"] = opp_counts["team_id"].map({100: 200, 200: 100})
+        opp_counts = opp_counts.rename(columns={"_self_count": "opp_tracked_count"})
+        df = df.merge(opp_counts, on=["match_id", "team_id"], how="left")
+        df["opp_tracked_count"] = df["opp_tracked_count"].fillna(0).astype(int)
 
         # ------------------------------------------------------------------
         # Step 6d — Differential features (team minus opponent)
