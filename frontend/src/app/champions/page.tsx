@@ -597,7 +597,12 @@ function MatchupResultsPanel({
                       </strong>
                       <RoleBadge role={c.role} />
                     </div>
-                    <strong style={{ fontSize: 13, color: "var(--danger-500)", flexShrink: 0 }}>{pct(c.counter_win_rate)}</strong>
+                    <strong
+                      style={{ fontSize: 13, color: "var(--danger-500)", flexShrink: 0 }}
+                      title={`Smoothed from ${c.games_played} games`}
+                    >
+                      {pct(c.smoothed_win_rate)}
+                    </strong>
                   </div>
                 );
               })}
@@ -634,7 +639,12 @@ function MatchupResultsPanel({
                       </strong>
                       <RoleBadge role={f.role} />
                     </div>
-                    <strong style={{ fontSize: 13, color: "var(--signal-lime-400)", flexShrink: 0 }}>{pct(f.our_win_rate)}</strong>
+                    <strong
+                      style={{ fontSize: 13, color: "var(--signal-lime-400)", flexShrink: 0 }}
+                      title={`Smoothed from ${f.games_played} games`}
+                    >
+                      {pct(f.smoothed_win_rate)}
+                    </strong>
                   </div>
                 );
               })}
