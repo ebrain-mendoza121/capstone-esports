@@ -563,7 +563,7 @@ def get_rolling_features_batch(
     # ------------------------------------------------------------------
     agg_sql = text("""
         WITH inputs AS (
-            SELECT * FROM unnest(:puuids::text[], :timestamps::bigint[])
+            SELECT * FROM unnest(CAST(:puuids AS text[]), CAST(:timestamps AS bigint[]))
                        AS t(puuid, before_ts)
         ),
         base AS (
@@ -613,7 +613,7 @@ def get_rolling_features_batch(
     # ------------------------------------------------------------------
     streak_sql = text("""
         WITH inputs AS (
-            SELECT * FROM unnest(:puuids::text[], :timestamps::bigint[])
+            SELECT * FROM unnest(CAST(:puuids AS text[]), CAST(:timestamps AS bigint[]))
                        AS t(puuid, before_ts)
         ),
         ranked AS (
