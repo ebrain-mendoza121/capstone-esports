@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useParams } from "next/navigation";
 import styles from "@/app/mvp.module.css";
 import {
   MockApiError,
@@ -22,8 +22,6 @@ function formatDuration(milliseconds: number): string {
 export default function TimelinePage() {
   const params = useParams<{ match_id: string }>();
   const matchId = Array.isArray(params.match_id) ? params.match_id[0] : params.match_id;
-  const searchParams = useSearchParams();
-  const fromPuuid = searchParams.get("puuid") ?? "";
 
   const [availability, setAvailability] = useState<TimelineAvailability | null>(null);
   const [timelineError, setTimelineError] = useState<string | null>(null);
@@ -112,27 +110,7 @@ export default function TimelinePage() {
       <div className={styles.container}>
         <header className={styles.hero}>
           <p className={styles.eyebrow}>Frontend MVP · Page 7</p>
-          <div className={styles.heroTitleRow}>
-            <h1 className={styles.title}>Timeline View</h1>
-            <div className={styles.dashboardActions}>
-              <Link
-                className={styles.linkChip}
-                href={`/match/${matchId}${fromPuuid ? `?puuid=${encodeURIComponent(fromPuuid)}` : ""}`}
-              >
-                Back to Match
-              </Link>
-              {fromPuuid ? (
-                <>
-                  <Link className={styles.linkChip} href={`/player/${fromPuuid}/matches`}>
-                    Back to Matches
-                  </Link>
-                  <Link className={styles.linkChip} href={`/player/${fromPuuid}`}>
-                    Back to Dashboard
-                  </Link>
-                </>
-              ) : null}
-            </div>
-          </div>
+          <h1 className={styles.title}>Timeline View</h1>
         </header>
 
         <section className={styles.section}>
@@ -141,10 +119,7 @@ export default function TimelinePage() {
               <h2 className={styles.sectionTitle}>Timeline Availability</h2>
               <p className={styles.sectionCopy}>Availability check before loading frame and event data.</p>
             </div>
-            <Link
-              className={styles.linkChip}
-              href={`/match/${matchId}${fromPuuid ? `?puuid=${encodeURIComponent(fromPuuid)}` : ""}`}
-            >
+            <Link className={styles.linkChip} href={`/match/${matchId}`}>
               Back to Match Detail
             </Link>
           </div>
