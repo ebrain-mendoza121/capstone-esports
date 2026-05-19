@@ -128,6 +128,16 @@ class RiotClient:
             raise RiotApiError("PUUID not found in Account-V1 response.")
         return puuid
 
+    async def get_account_by_puuid(self, puuid: str, routing: str) -> Dict[str, Any]:
+        """Resolve current Riot ID (gameName + tagLine) from a PUUID."""
+        data = await self._request_json(
+            routing=routing,
+            path=f"/riot/account/v1/accounts/by-puuid/{puuid}",
+        )
+        if not isinstance(data, dict):
+            raise RiotApiError("Unexpected response for account-by-puuid.")
+        return data
+
     async def get_match_ids(
         self,
         puuid: str,

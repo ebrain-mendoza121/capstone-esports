@@ -8,10 +8,10 @@ import { buildApiUrl } from "@/lib/apiBaseUrl";
 import {
   DraftData,
   EarlyGamePrediction,
+  GoldDiffPoint,
   MatchDetail,
   MockApiError,
   ThreatWeights,
-  TimelineFrameRaw,
   WinPredictionBacktest,
   frontendMvpClient,
 } from "@/lib/frontendMvpClient";
@@ -210,11 +210,7 @@ function ChampionChipRow({
 }
 
 // ── Gold Differential Chart ──────────────────────────────────────────────────
-
-interface GoldDiffPoint {
-  minute: number;
-  diff: number; // team100_total_gold - team200_total_gold
-}
+// GoldDiffPoint is imported from frontendMvpClient — { minute, diff }
 
 const CHART_W = 600;
 const CHART_H = 140;
@@ -352,20 +348,10 @@ export default function MatchDetailPage() {
         await frontendMvpClient.getTimelineAvailability(matchId);
         hasTimeline = true;
         try {
-          const rawFrames: TimelineFrameRaw[] = await frontendMvpClient.getTimelineFramesAll(matchId, 1000);
-          const byMinute = new Map<number, { t100: number; t200: number }>();
-          for (const f of rawFrames) {
-            const min = Math.floor(f.frame_timestamp / 60000);
-            if (!byMinute.has(min)) byMinute.set(min, { t100: 0, t200: 0 });
-            const e = byMinute.get(min)!;
-            if (f.participant_id <= 5) e.t100 += f.total_gold;
-            else e.t200 += f.total_gold;
-          }
-          goldPts = Array.from(byMinute.entries())
-            .sort((a, b) => a[0] - b[0])
-            .map(([minute, g]) => ({ minute, diff: g.t100 - g.t200 }));
+          // Use the aggregated endpoint — returns ~30 rows instead of ~300 raw frames.
+          goldPts = await frontendMvpClient.getGoldDiff(matchId);
         } catch {
-          // frames fetch failed — chart won't render but timeline badge still shows
+          // gold diff fetch failed — chart won't render but timeline badge still shows
         }
       } catch (error) {
         if (error instanceof MockApiError && error.status === 404) {

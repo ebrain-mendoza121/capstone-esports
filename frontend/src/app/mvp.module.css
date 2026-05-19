@@ -3,7 +3,8 @@
   position: relative;
   background: var(--carbon-950);
   color: var(--mist-100);
-  overflow: hidden;
+  /* No overflow:hidden here — wide tables are handled by min-width:0 on .section
+     (grid item fix) + overflow-x:auto on .tableWrap. */
 }
 
 .page::before {
@@ -21,7 +22,7 @@
 .container {
   position: relative;
   z-index: 1;
-  width: min(1280px, 100% - 28px);
+  width: min(1120px, calc(100% - 1.5rem));
   margin-inline: auto;
   padding: 28px 0 42px;
   display: grid;
@@ -87,6 +88,7 @@
 }
 
 .section {
+  min-width: 0; /* grid item: allow narrowing so tableWrap overflow-x:auto can scroll */
   border: 1px solid rgba(116, 199, 255, 0.16);
   border-radius: 18px;
   background: rgba(17, 22, 28, 0.78);
@@ -231,7 +233,13 @@
 }
 
 .tableWrap {
-  overflow: auto;
+  /* display:block + width:100% forces the scroll container to honour its
+     parent's width. Without this a CSS table's min-content-width can leak
+     out of the overflow:auto ancestor and push body wider than the viewport. */
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 12px;
 }
@@ -494,7 +502,7 @@
 
 @media (max-width: 760px) {
   .container {
-    width: min(1280px, 100% - 18px);
+    width: calc(100% - 1rem);
     padding-top: 18px;
   }
 

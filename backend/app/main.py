@@ -123,8 +123,15 @@ async def _lifespan(app: FastAPI):  # noqa: ARG001
     # 8 seconds is enough for the PERCENTILE_CONT query on a cold DB.
     await asyncio.sleep(8)
 
+    # Start the opponent backfill worker — consumes the in-memory job queue
+    # populated by /ingest/... and /teams/matchup. Respects the global Riot
+    # client semaphore (3) so it never exceeds dev-key rate limits.
+    from app.services.opponent_backfill import start_worker, stop_worker
+    start_worker()
+
     yield  # application runs
-    # (shutdown cleanup goes here if ever needed)
+
+    await stop_worker()
 
 
 app = FastAPI(title="Esports Analytics API", version="0.1.0", lifespan=_lifespan)
@@ -148,8 +155,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # ---------------------------------------------------------------------------
 @app.middleware("http")
 async def _timeout_middleware(request: Request, call_next):
-    # Bulk import and backfill paths get a generous timeout; everything else gets 60s
-    _long_timeout_prefixes = ("/backfill", "/matchups/import", "/ai/train")
+    # Bulk import, backfill, ingestion, and training paths get a generous
+    # timeout; everything else gets 60s. Ingestion can run dozens of Riot API
+    # calls per player (account + match list + N matches + N timelines).
+    _long_timeout_prefixes = ("/backfill", "/matchups/import", "/ai/train", "/ingest")
     timeout = 600.0 if any(request.url.path.startswith(p) for p in _long_timeout_prefixes) else 60.0
     try:
         return await asyncio.wait_for(call_next(request), timeout=timeout)

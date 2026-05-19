@@ -1,5 +1,6 @@
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -38,6 +39,48 @@ def get_timeline_summary(match_id: str, db: Session = Depends(get_db)) -> Dict[s
         "participant_frame_rows": frame_count,
         "event_rows": event_count,
     }
+
+
+@router.get("/{match_id}/gold-diff")
+def get_gold_diff(match_id: str, db: Session = Depends(get_db)) -> List[Dict[str, Any]]:
+    """
+    Returns per-minute team gold difference for a match.
+
+    Team 100 = participants 1–5, Team 200 = participants 6–10.
+    diff > 0 means Team 100 is ahead; diff < 0 means Team 200 is ahead.
+
+    Aggregates server-side — returns ~20-30 rows instead of the ~300 raw
+    frame rows the /frames endpoint would return, making it cheaper for
+    the gold-diff chart on the match detail page.
+
+    Response: [{minute: int, diff: int}, ...]  sorted by minute ASC.
+    """
+    tl = db.query(MatchTimeline.match_id).filter(MatchTimeline.match_id == match_id).first()
+    if not tl:
+        raise HTTPException(
+            status_code=404,
+            detail="Timeline not found for this match. Re-ingest with fetch_timeline=true.",
+        )
+
+    sql = text("""
+        SELECT
+            (frame_timestamp / 60000)::int                          AS minute,
+            SUM(total_gold) FILTER (WHERE participant_id BETWEEN 1 AND 5)  AS t100_gold,
+            SUM(total_gold) FILTER (WHERE participant_id BETWEEN 6 AND 10) AS t200_gold
+        FROM timeline_participant_frames
+        WHERE match_id = :match_id
+        GROUP BY minute
+        ORDER BY minute ASC
+    """)
+
+    rows = db.execute(sql, {"match_id": match_id}).mappings().all()
+    return [
+        {
+            "minute": row["minute"],
+            "diff": int((row["t100_gold"] or 0) - (row["t200_gold"] or 0)),
+        }
+        for row in rows
+    ]
 
 
 @router.get("/{match_id}/frames")

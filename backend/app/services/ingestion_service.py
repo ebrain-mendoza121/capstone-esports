@@ -31,6 +31,9 @@ async def ingest_player(
 
     Match-detail calls are fetched concurrently in batches of 5 to cut
     wall-clock time from ~60s to ~10-15s for a 20-match ingest.
+    When fetch_timeline=True, timelines are also fetched concurrently
+    (up to 5 at a time) after all match bundles are inserted, avoiding
+    N sequential round trips.
     A single shared httpx client is used throughout - no per-request
     TCP handshake overhead.
 
@@ -90,6 +93,7 @@ async def ingest_player(
         match_jsons = await client.get_matches_concurrent(new_ids, routing)
 
         # Insert sequentially (DB writes are fast; API was the bottleneck)
+        inserted_ids: List[str] = []
         for idx, match_id in enumerate(new_ids, 1):
             result = match_jsons.get(match_id)
             if isinstance(result, Exception):
@@ -109,23 +113,8 @@ async def ingest_player(
                     player_id=player.id,
                     routing=routing,
                 )
-
-                if fetch_timeline:
-                    try:
-                        timeline_json = await client.get_match_timeline(
-                            match_id, routing
-                        )
-                        insert_timeline(
-                            session=session,
-                            match_id=match_id,
-                            timeline_json=timeline_json,
-                        )
-                    except Exception as te:
-                        logger.warning(
-                            "Timeline fetch failed for %s: %s", match_id, te
-                        )
-
                 inserted += 1
+                inserted_ids.append(match_id)
                 print(
                     f"[ingest] {tag} - [{idx}/{total_new}] saved {match_id}",
                     flush=True,
@@ -139,6 +128,43 @@ async def ingest_player(
                 logger.warning("Failed to insert match %s: %s", match_id, exc)
                 session.rollback()
                 failed.append(match_id)
+
+        # Fetch all timelines concurrently, then insert — avoids N sequential round trips
+        if fetch_timeline and inserted_ids:
+            print(
+                f"[ingest] {tag} - fetching {len(inserted_ids)} timelines concurrently ...",
+                flush=True,
+            )
+
+            async def _fetch_timeline(mid: str):
+                try:
+                    return mid, await client.get_match_timeline(mid, routing)
+                except Exception as te:
+                    logger.warning("Timeline fetch failed for %s: %s", mid, te)
+                    return mid, None
+
+            semaphore = asyncio.Semaphore(5)
+
+            async def _fetch_with_sem(mid: str):
+                async with semaphore:
+                    return await _fetch_timeline(mid)
+
+            timeline_results = await asyncio.gather(
+                *[_fetch_with_sem(mid) for mid in inserted_ids]
+            )
+
+            for mid, timeline_json in timeline_results:
+                if timeline_json is not None:
+                    try:
+                        insert_timeline(
+                            session=session,
+                            match_id=mid,
+                            timeline_json=timeline_json,
+                        )
+                    except Exception as te:
+                        logger.warning("Timeline insert failed for %s: %s", mid, te)
+
+            print(f"[ingest] {tag} - timelines done.", flush=True)
 
         try:
             session.commit()

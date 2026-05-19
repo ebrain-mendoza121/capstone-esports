@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-BASE_URL="${1:-http://localhost:8000}"
+BASE_URL="${1:-https://capstone-esports-production-5631.up.railway.app}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="$SCRIPT_DIR"
 

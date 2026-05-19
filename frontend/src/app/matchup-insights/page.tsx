@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useState } from "react";
 import AppFrame from "@/components/layout/AppFrame";
 import RosterInputGroup from "@/components/forms/RosterInputGroup";
 import PageHeader from "@/components/ui/PageHeader";
@@ -311,6 +311,47 @@ function createEmptyPlayer(): PlayerInsightInputForm {
 }
 const emptyTeam = Array.from({ length: 5 }, createEmptyPlayer);
 
+const VALID_ROLES = new Set<PlayerRoleCode>(["TOP", "JUNGLE", "MID", "BOT", "SUPPORT"]);
+const VALID_PLATFORMS = new Set<PlatformCode>([
+  "NA", "EUW", "EUNE", "KR", "BR", "LAN", "LAS", "JP", "OCE", "TR", "RU",
+]);
+
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === "," && !inQuotes) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+function parseRole(raw: string): PlayerRoleCode | null {
+  const value = raw.trim().toUpperCase();
+  if (value === "MIDDLE") return "MID";
+  if (value === "ADC") return "BOT";
+  if (value === "SUP") return "SUPPORT";
+  if (VALID_ROLES.has(value as PlayerRoleCode)) return value as PlayerRoleCode;
+  return null;
+}
+
 function normalizePlayers(players: PlayerInsightInputForm[]): PlayerInsightInput[] | null {
   const normalized = players.map((p) => ({
     gameName: p.gameName.trim(),
@@ -330,6 +371,7 @@ export default function MatchupInsightsPage() {
   const [teamBPlayers, setTeamBPlayers] = useState<PlayerInsightInputForm[]>(emptyTeam);
   const [result, setResult] = useState<TeamMatchupResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [csvStatus, setCsvStatus] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const updateA = (i: number, f: keyof PlayerInsightInputForm, v: string) =>
@@ -366,6 +408,115 @@ export default function MatchupInsightsPage() {
     }
   };
 
+  const handleCsvUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setErrorMessage(null);
+    setCsvStatus(null);
+
+    try {
+      const raw = await file.text();
+      const lines = raw
+        .replace(/^\uFEFF/, "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+      if (lines.length < 2) {
+        throw new Error("CSV must include a header and 10 player rows.");
+      }
+
+      const headers = splitCsvLine(lines[0]).map((h) => h.toLowerCase());
+      const idx = {
+        side: headers.indexOf("side"),
+        platform: headers.indexOf("platform"),
+        gameName: headers.indexOf("game_name"),
+        tagLine: headers.indexOf("tag_line"),
+        role: headers.indexOf("role"),
+        champion: headers.indexOf("champion"),
+      };
+
+      if (idx.side < 0 || idx.platform < 0 || idx.gameName < 0 || idx.tagLine < 0 || idx.role < 0) {
+        throw new Error(
+          "Missing required columns. Use: side,platform,game_name,tag_line,role,champion",
+        );
+      }
+
+      const dataRows = lines.slice(1);
+      if (dataRows.length !== 10) {
+        throw new Error("Matchup CSV must contain exactly 10 players (5 blue + 5 red).");
+      }
+
+      const blue: PlayerInsightInputForm[] = [];
+      const red: PlayerInsightInputForm[] = [];
+      let bluePlatform: PlatformCode | null = null;
+      let redPlatform: PlatformCode | null = null;
+
+      for (let rowIdx = 0; rowIdx < dataRows.length; rowIdx += 1) {
+        const row = splitCsvLine(dataRows[rowIdx]);
+        const rowNum = rowIdx + 2;
+
+        const side = (row[idx.side] ?? "").trim().toLowerCase();
+        const platform = (row[idx.platform] ?? "").toUpperCase().trim();
+        const gameName = (row[idx.gameName] ?? "").trim();
+        const tagLine = (row[idx.tagLine] ?? "").trim();
+        const roleRaw = row[idx.role] ?? "";
+        const champion = idx.champion >= 0 ? (row[idx.champion] ?? "").trim() : "";
+
+        if (side !== "blue" && side !== "red") {
+          throw new Error(`Row ${rowNum}: side must be 'blue' or 'red'.`);
+        }
+        if (!VALID_PLATFORMS.has(platform as PlatformCode)) {
+          throw new Error(`Row ${rowNum}: invalid platform '${platform}'.`);
+        }
+        if (!gameName || !tagLine) {
+          throw new Error(`Row ${rowNum}: game_name and tag_line are required.`);
+        }
+        const role = parseRole(roleRaw);
+        if (!role) {
+          throw new Error(`Row ${rowNum}: invalid role '${roleRaw}'.`);
+        }
+
+        const entry: PlayerInsightInputForm = {
+          gameName,
+          tagLine,
+          role,
+          champion,
+        };
+
+        if (side === "blue") {
+          if (!bluePlatform) bluePlatform = platform as PlatformCode;
+          if (bluePlatform !== platform) {
+            throw new Error("All blue rows must use the same platform.");
+          }
+          blue.push(entry);
+        } else {
+          if (!redPlatform) redPlatform = platform as PlatformCode;
+          if (redPlatform !== platform) {
+            throw new Error("All red rows must use the same platform.");
+          }
+          red.push(entry);
+        }
+      }
+
+      if (blue.length !== 5 || red.length !== 5) {
+        throw new Error("CSV must contain exactly 5 blue and 5 red players.");
+      }
+
+      setTeamAPlatform(bluePlatform ?? "");
+      setTeamBPlatform(redPlatform ?? "");
+      setTeamAPlayers(blue);
+      setTeamBPlayers(red);
+      setCsvStatus(`Loaded ${blue.length + red.length} players from ${file.name}.`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to parse CSV.";
+      setErrorMessage(msg);
+    } finally {
+      event.target.value = "";
+    }
+  };
+
   return (
     <AppFrame>
       <PageHeader
@@ -378,6 +529,46 @@ export default function MatchupInsightsPage() {
 
       <form onSubmit={handleSubmit}>
         <section className={styles.sectionCard}>
+          <h2 className={styles.sectionTitle}>Upload Matchup CSV</h2>
+          <p className={styles.sectionText}>
+            Format required: <strong>side,platform,game_name,tag_line,role,champion</strong>
+          </p>
+          <p className={styles.sectionText}>
+            Use exactly 10 rows: 5 blue + 5 red. Side must be blue or red.
+          </p>
+          <pre
+            style={{
+              marginTop: 10,
+              padding: 12,
+              borderRadius: 8,
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              overflowX: "auto",
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}
+          >
+{`side,platform,game_name,tag_line,role,champion
+blue,KR,T1 Zeus,KR1,TOP,Renekton
+blue,KR,T1 Oner,KR1,JUNGLE,Viego
+blue,KR,T1 Faker,KR1,MID,Ahri
+blue,KR,T1 Gumayusi,KR1,BOT,Jinx
+blue,KR,T1 Keria,KR1,SUPPORT,Rakan
+red,KR,HLE Doran,KR1,TOP,Gnar
+red,KR,HLE Peanut,KR1,JUNGLE,Maokai
+red,KR,HLE Zeka,KR1,MID,Yone
+red,KR,HLE Viper,KR1,BOT,Kaisa
+red,KR,HLE Delight,KR1,SUPPORT,Nautilus`}
+          </pre>
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            onChange={handleCsvUpload}
+            style={{ marginTop: 10 }}
+          />
+          {csvStatus && <p className={styles.statusInfo}>{csvStatus}</p>}
+
+          <hr className={styles.divider} />
           <h2 className={styles.sectionTitle}>5v5 Matchup Input</h2>
           <hr className={styles.divider} />
           <div className={styles.teamGrid}>

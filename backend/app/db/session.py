@@ -17,8 +17,9 @@ settings = get_settings()
 #     A pool of 10 handles 50+ concurrent FastAPI workers comfortably.
 #
 # IMPORTANT: Transaction Mode does not support PostgreSQL prepared statements.
-#   `prepare_threshold=0` tells psycopg to never prepare statements, which is
-#   required for PgBouncer Transaction Mode compatibility.
+#   `prepare_threshold=None` disables psycopg3 auto-preparation entirely, which
+#   is required for PgBouncer Transaction Mode compatibility.
+#   (prepare_threshold=0 means the OPPOSITE — prepare every statement immediately.)
 #
 # SQLite (used by tests via conftest.py DATABASE_URL override) does NOT support
 # pool_size / max_overflow / pool_timeout / connect_args — those are PG-only.
@@ -36,7 +37,7 @@ _pool_kwargs = (
                              # This keeps the Uvicorn thread pool healthy — threads fail quickly and free
                              # up so DB-free endpoints (/ and /health) aren't starved by stalled waiters.
         pool_recycle=1800,   # recycle every 30 min to avoid server-side idle timeouts
-        connect_args={"prepare_threshold": 0},  # disable prepared statements for PgBouncer Transaction Mode
+        connect_args={"prepare_threshold": None},  # None = never auto-prepare (required for PgBouncer transaction mode)
     )
 )
 
@@ -54,7 +55,18 @@ engine = create_engine(settings.database_url, **_pool_kwargs)
 if not _is_sqlite:
     @event.listens_for(engine, "connect")
     def _set_statement_timeout(dbapi_conn, _connection_record):
-        """Apply a 20 s statement timeout on every fresh connection."""
+        """Apply a 20 s statement timeout on every fresh connection.
+
+        Also explicitly disables psycopg3 auto-prepare here as belt-and-suspenders
+        on top of the connect_args setting. PgBouncer transaction mode deallocates
+        server-side prepared statements after every transaction, so any cached
+        statement name will be invalid the next time the pooled connection is
+        checked out — causing:
+            InvalidSqlStatementName: prepared statement "_pg3_N" does not exist
+        Setting prepare_threshold=None on the live connection object ensures the
+        setting is always applied regardless of driver/SQLAlchemy version quirks.
+        """
+        dbapi_conn.prepare_threshold = None  # belt-and-suspenders: never auto-prepare
         with dbapi_conn.cursor() as cur:
             cur.execute("SET statement_timeout = 20000")  # milliseconds
 

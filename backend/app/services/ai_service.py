@@ -708,6 +708,15 @@ def train_win_predictor(db: Session) -> dict:
         )
 
     df_all = df_all.dropna(subset=["win"])
+    # Keep only rows with real opponent context so diff features have signal.
+    # Without this, opp_avg_* is mostly NaN→median-imputed and AUC collapses to ~0.50.
+    if "opp_tracked_count" in df_all.columns:
+        df_all = df_all[df_all["opp_tracked_count"] >= 2]
+        if len(df_all) < 100:
+            raise InsufficientDataError(
+                f"Need 100+ rows with >=2 tracked opponents. Have {len(df_all)}. "
+                "Ingest more players that share matches with each other."
+            )
     df_all = df_all.sort_values("game_creation").reset_index(drop=True)
 
     FEATURE_COLS = [
@@ -743,6 +752,9 @@ def train_win_predictor(db: Session) -> dict:
         # Blue side (team_id == 100): slight win-rate advantage in LoL
         # due to champion select order. Small but consistent signal.
         "blue_side",
+        # How many opponents were tracked — lets the model down-weight
+        # rows where opp_avg_* came from imputation.
+        "opp_tracked_count",
     ]
 
     available_cols = [c for c in FEATURE_COLS if c in df_all.columns]
@@ -1047,6 +1059,8 @@ _NEUTRAL_FALLBACKS: dict[str, float] = {
     "gold_diff_norm":      0.0,
     # Blue side: 0.5 = unknown side
     "blue_side":           0.5,
+    # Opponent context count: 0 = no tracked opponents
+    "opp_tracked_count":   0.0,
 }
 
 
