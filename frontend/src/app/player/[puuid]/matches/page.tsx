@@ -235,7 +235,7 @@ export default function MatchHistoryPage() {
                       return (
                         <tr
                           key={match.match_id}
-                          onClick={() => router.push(`/match/${match.match_id}`)}
+                          onClick={() => router.push(`/match/${match.match_id}?puuid=${encodeURIComponent(puuid)}`)}
                           style={{ cursor: "pointer" }}
                         >
                           <td>
@@ -378,7 +378,7 @@ export default function MatchHistoryPage() {
 
                       <Link
                         className={`${styles.linkChip} ${styles.dashboardMobileAction}`}
-                        href={`/match/${match.match_id}`}
+                        href={`/match/${match.match_id}?puuid=${encodeURIComponent(puuid)}`}
                       >
                         Open Match
                       </Link>

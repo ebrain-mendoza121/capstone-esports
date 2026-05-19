@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import styles from "@/app/mvp.module.css";
 import { buildApiUrl } from "@/lib/apiBaseUrl";
 import {
@@ -292,6 +292,8 @@ export default function MatchDetailPage() {
   const params = useParams<{ match_id: string }>();
   const matchId = Array.isArray(params.match_id) ? params.match_id[0] : params.match_id;
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const fromPuuid = searchParams.get("puuid") ?? "";
 
   const [detail, setDetail] = useState<MatchDetail | null>(null);
   const [draft, setDraft] = useState<DraftData | null>(null);
@@ -424,9 +426,21 @@ export default function MatchDetailPage() {
           <p className={styles.eyebrow}>Frontend MVP · Page 4</p>
           <div className={styles.heroTitleRow}>
             <h1 className={`${styles.title} ${styles.heroTitle}`}>Match Detail</h1>
-            <button className={styles.linkChip} onClick={() => router.back()}>
-              ← Back
-            </button>
+            <div className={styles.dashboardActions}>
+              {fromPuuid ? (
+                <>
+                  <Link className={styles.linkChip} href={`/player/${fromPuuid}/matches`}>
+                    Back to Matches
+                  </Link>
+                  <Link className={styles.linkChip} href={`/player/${fromPuuid}`}>
+                    Back to Dashboard
+                  </Link>
+                </>
+              ) : null}
+              <button className={styles.linkChip} onClick={() => router.back()}>
+                Browser Back
+              </button>
+            </div>
           </div>
         </header>
 
@@ -437,7 +451,10 @@ export default function MatchDetailPage() {
               <p className={styles.sectionCopy}>Core metadata for this match snapshot.</p>
             </div>
             {timelineAvailable ? (
-              <Link className={styles.linkChip} href={`/match/${matchId}/timeline`}>
+              <Link
+                className={styles.linkChip}
+                href={`/match/${matchId}/timeline${fromPuuid ? `?puuid=${encodeURIComponent(fromPuuid)}` : ""}`}
+              >
                 View Timeline
               </Link>
             ) : (

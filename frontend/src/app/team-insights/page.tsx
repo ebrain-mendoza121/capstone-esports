@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useState } from "react";
 import AppFrame from "@/components/layout/AppFrame";
 import RosterInputGroup from "@/components/forms/RosterInputGroup";
 import PageHeader from "@/components/ui/PageHeader";
@@ -165,12 +165,54 @@ function createEmptyPlayer(): PlayerInsightInputForm {
 
 const defaultRoster = Array.from({ length: 5 }, createEmptyPlayer);
 
+const VALID_ROLES = new Set<PlayerRoleCode>(["TOP", "JUNGLE", "MID", "BOT", "SUPPORT"]);
+const VALID_PLATFORMS = new Set<PlatformCode>([
+  "NA", "EUW", "EUNE", "KR", "BR", "LAN", "LAS", "JP", "OCE", "TR", "RU",
+]);
+
+function splitCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (ch === "," && !inQuotes) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  out.push(cur.trim());
+  return out;
+}
+
+function parseRole(raw: string): PlayerRoleCode | null {
+  const value = raw.trim().toUpperCase();
+  if (value === "MIDDLE") return "MID";
+  if (value === "ADC") return "BOT";
+  if (value === "SUP") return "SUPPORT";
+  if (VALID_ROLES.has(value as PlayerRoleCode)) return value as PlayerRoleCode;
+  return null;
+}
+
 export default function TeamInsightsPage() {
   const { championOptions, loadingChampionOptions } = useChampionOptions();
   const [teamPlatform, setTeamPlatform] = useState<PlatformCode | "">("");
   const [players, setPlayers] = useState<PlayerInsightInputForm[]>(defaultRoster);
   const [result, setResult] = useState<TeamBuildResponse | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [csvStatus, setCsvStatus] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const updatePlayer = (index: number, field: keyof PlayerInsightInputForm, value: string) => {
@@ -213,6 +255,94 @@ export default function TeamInsightsPage() {
     }
   };
 
+  const handleCsvUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setErrorMessage(null);
+    setCsvStatus(null);
+
+    try {
+      const raw = await file.text();
+      const lines = raw
+        .replace(/^\uFEFF/, "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+
+      if (lines.length < 2) {
+        throw new Error("CSV must include a header and 5 player rows.");
+      }
+
+      const headers = splitCsvLine(lines[0]).map((h) => h.toLowerCase());
+      const idx = {
+        platform: headers.indexOf("platform"),
+        gameName: headers.indexOf("game_name"),
+        tagLine: headers.indexOf("tag_line"),
+        role: headers.indexOf("role"),
+        champion: headers.indexOf("champion"),
+      };
+
+      if (idx.platform < 0 || idx.gameName < 0 || idx.tagLine < 0 || idx.role < 0) {
+        throw new Error(
+          "Missing required columns. Use: platform,game_name,tag_line,role,champion",
+        );
+      }
+
+      const dataRows = lines.slice(1);
+      if (dataRows.length !== 5) {
+        throw new Error("Team Insights CSV must contain exactly 5 players.");
+      }
+
+      const parsedPlayers: PlayerInsightInputForm[] = [];
+      let detectedPlatform: PlatformCode | null = null;
+
+      for (let rowIdx = 0; rowIdx < dataRows.length; rowIdx += 1) {
+        const row = splitCsvLine(dataRows[rowIdx]);
+        const rowNum = rowIdx + 2;
+
+        const platform = (row[idx.platform] ?? "").toUpperCase().trim();
+        const gameName = (row[idx.gameName] ?? "").trim();
+        const tagLine = (row[idx.tagLine] ?? "").trim();
+        const roleRaw = row[idx.role] ?? "";
+        const champion = idx.champion >= 0 ? (row[idx.champion] ?? "").trim() : "";
+
+        if (!VALID_PLATFORMS.has(platform as PlatformCode)) {
+          throw new Error(`Row ${rowNum}: invalid platform '${platform}'.`);
+        }
+        if (!gameName || !tagLine) {
+          throw new Error(`Row ${rowNum}: game_name and tag_line are required.`);
+        }
+        const role = parseRole(roleRaw);
+        if (!role) {
+          throw new Error(`Row ${rowNum}: invalid role '${roleRaw}'.`);
+        }
+
+        if (!detectedPlatform) {
+          detectedPlatform = platform as PlatformCode;
+        } else if (detectedPlatform !== platform) {
+          throw new Error("All rows must use the same platform for Team Insights.");
+        }
+
+        parsedPlayers.push({
+          gameName,
+          tagLine,
+          role,
+          champion,
+        });
+      }
+
+      setTeamPlatform(detectedPlatform ?? "");
+      setPlayers(parsedPlayers);
+      setCsvStatus(`Loaded ${parsedPlayers.length} players from ${file.name}.`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to parse CSV.";
+      setErrorMessage(msg);
+    } finally {
+      event.target.value = "";
+    }
+  };
+
   return (
     <AppFrame>
       <PageHeader
@@ -224,6 +354,42 @@ export default function TeamInsightsPage() {
       />
 
       <form onSubmit={handleSubmit} className={styles.formStack}>
+        <section className={styles.sectionCard}>
+          <h2 className={styles.sectionTitle}>Upload Team CSV</h2>
+          <p className={styles.sectionText}>
+            Format required: <strong>platform,game_name,tag_line,role,champion</strong>
+          </p>
+          <p className={styles.sectionText}>
+            Use exactly 5 rows. Role accepted: TOP, JUNGLE, MID, BOT, SUPPORT.
+          </p>
+          <pre
+            style={{
+              marginTop: 10,
+              padding: 12,
+              borderRadius: 8,
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.08)",
+              overflowX: "auto",
+              fontSize: 12,
+              lineHeight: 1.45,
+            }}
+          >
+{`platform,game_name,tag_line,role,champion
+KR,T1 Zeus,KR1,TOP,Renekton
+KR,T1 Oner,KR1,JUNGLE,Viego
+KR,T1 Faker,KR1,MID,Ahri
+KR,T1 Gumayusi,KR1,BOT,Jinx
+KR,T1 Keria,KR1,SUPPORT,Rakan`}
+          </pre>
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            onChange={handleCsvUpload}
+            style={{ marginTop: 10 }}
+          />
+          {csvStatus && <p className={styles.statusInfo}>{csvStatus}</p>}
+        </section>
+
         <RosterInputGroup
           title="Team Roster"
           description="Enter Game Name, Tag Line, Role, and optionally Champion for all 5 players."
